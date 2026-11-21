@@ -81,7 +81,7 @@ internal sealed partial class AfterbreakSession
     private bool IsEditingOrPreviewing() => visible == Surface.Capture ||
         (!scheduledSurface && visible is (Surface.Warning or Surface.Preview)) ||
         (desktop.MenuOpen && visible != Surface.Preview) || reminderSettings?.AppWindow.IsVisible == true ||
-        captureSettings?.AppWindow.IsVisible == true || board?.IsEditing == true;
+        captureSettings?.AppWindow.IsVisible == true || appearanceSettings?.AppWindow.IsVisible == true || board?.IsEditing == true;
 
     private void UpdateScheduledReminders(bool recheckPresentation = false)
     {

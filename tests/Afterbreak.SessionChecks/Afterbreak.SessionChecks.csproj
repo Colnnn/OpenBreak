@@ -11,6 +11,8 @@
     <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
     <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
     <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />
+    <Compile Include="../../AppearancePolicy.cs" Link="AppearancePolicy.cs" />
+    <Compile Include="../../AppearanceStorage.cs" Link="AppearanceStorage.cs" />
     <Compile Include="../../CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
     <Compile Include="../../CaptureStorage.cs" Link="CaptureStorage.cs" />
     <Compile Include="../TestClock.cs" Link="TestClock.cs" />

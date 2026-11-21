@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
@@ -20,7 +19,6 @@ internal sealed class CaptureSettingsWindow : Window
     {
         this.apply = apply;
         Title = "Afterbreak · Capture settings";
-        SystemBackdrop = new MicaBackdrop();
 
         var title = SurfaceStyle.Label("Capture settings", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
@@ -67,7 +65,7 @@ internal sealed class CaptureSettingsWindow : Window
         form.Children.Add(error);
         form.Children.Add(openGuide);
         form.Children.Add(guide);
-        Content = new ScrollViewer { Content = form, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        Content = SurfaceStyle.Scroll(form);
         AppWindow.Closing += (_, args) =>
         {
             if (!quitting)

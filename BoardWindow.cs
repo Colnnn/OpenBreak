@@ -27,12 +27,15 @@ internal sealed class BoardWindow : Window
     private readonly TaskStore store;
     private readonly Grid root;
     private readonly Grid columns;
+    private readonly Grid header;
+    private readonly StackPanel headerActions;
     private readonly TextBlock heading;
     private readonly Button archiveButton;
     private readonly ScrollViewer scroll;
     private readonly InfoBar error;
     private readonly Button retry;
     private readonly Dictionary<(long TaskId, CardAction Action), Control> taskActions = [];
+    private readonly List<StackPanel> cardActions = [];
     private readonly Border[] lanes = new Border[Columns.Length];
     private bool archived;
     private bool placed;
@@ -40,12 +43,14 @@ internal sealed class BoardWindow : Window
     private bool editing;
     private bool lanesStacked;
     private long? draggedTask;
+    private double textScale = 1;
+    private ElementTheme dialogTheme;
+    private ContentDialog? activeDialog;
 
     internal BoardWindow(TaskStore store, Action? addTask = null)
     {
         this.store = store;
         Title = "Afterbreak · Tasks";
-        SystemBackdrop = new MicaBackdrop();
 
         heading = SurfaceStyle.Label("Tasks", 30, FontWeights.SemiBold);
         heading.TextWrapping = TextWrapping.Wrap;
@@ -58,10 +63,10 @@ internal sealed class BoardWindow : Window
         addButton.Click += (_, _) => addTask?.Invoke();
         archiveButton = new Button { Content = "Archive", VerticalAlignment = VerticalAlignment.Center };
 
-        var headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         headerActions.Children.Add(archiveButton);
         headerActions.Children.Add(addButton);
-        var header = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
+        header = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -69,12 +74,7 @@ internal sealed class BoardWindow : Window
         header.Children.Add(heading);
         Grid.SetColumn(headerActions, 1);
         header.Children.Add(headerActions);
-        header.SizeChanged += (_, args) =>
-        {
-            var stack = args.NewSize.Width < 330;
-            Grid.SetColumn(headerActions, stack ? 0 : 1);
-            Grid.SetRow(headerActions, stack ? 1 : 0);
-        };
+        header.SizeChanged += (_, _) => LayoutHeader();
 
         retry = new Button { Content = "Retry" };
         retry.Click += (_, _) => Refresh();
@@ -89,7 +89,7 @@ internal sealed class BoardWindow : Window
             Grid.SetColumn(lanes[index], index);
             columns.Children.Add(lanes[index]);
         }
-        columns.SizeChanged += (_, args) => LayoutLanes(args.NewSize.Width < 690);
+        columns.SizeChanged += (_, args) => LayoutLanes(args.NewSize.Width < 690 * textScale);
 
         scroll = new ScrollViewer
         {
@@ -130,6 +130,37 @@ internal sealed class BoardWindow : Window
 
     internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
     internal bool IsEditing => editing;
+
+    internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
+    {
+        dialogTheme = theme;
+        if (activeDialog is not null)
+        {
+            activeDialog.RequestedTheme = theme;
+        }
+        if (state.TextScale == textScale)
+        {
+            return;
+        }
+
+        textScale = state.TextScale;
+        LayoutHeader();
+        LayoutLanes(columns.ActualWidth < 690 * textScale);
+        foreach (var actions in cardActions)
+        {
+            actions.Orientation = CardActionOrientation;
+        }
+    }
+
+    private void LayoutHeader()
+    {
+        var stack = header.ActualWidth < 330 * textScale;
+        Grid.SetColumn(headerActions, stack ? 0 : 1);
+        Grid.SetRow(headerActions, stack ? 1 : 0);
+        headerActions.Orientation = header.ActualWidth < 185 * textScale ? Orientation.Vertical : Orientation.Horizontal;
+    }
+
+    private Orientation CardActionOrientation => textScale >= 1.5 ? Orientation.Vertical : Orientation.Horizontal;
 
     internal void Show(nint source)
     {
@@ -193,6 +224,7 @@ internal sealed class BoardWindow : Window
         catch (Exception exception) when (TaskStore.IsStorageError(exception))
         {
             taskActions.Clear();
+            cardActions.Clear();
             foreach (var lane in lanes)
             {
                 lane.Child = null;
@@ -223,6 +255,7 @@ internal sealed class BoardWindow : Window
     private void RenderTasks(IReadOnlyList<BoardTask> tasks)
     {
         taskActions.Clear();
+        cardActions.Clear();
         scroll.Visibility = Visibility.Visible;
         for (var column = 0; column < Columns.Length; column++)
         {
@@ -268,7 +301,8 @@ internal sealed class BoardWindow : Window
             body.Children.Add(note);
         }
 
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var actions = new StackPanel { Orientation = CardActionOrientation, Spacing = 8 };
+        cardActions.Add(actions);
         if (archived)
         {
             var restore = new Button { Content = "Restore" };
@@ -395,6 +429,7 @@ internal sealed class BoardWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot,
+            RequestedTheme = dialogTheme,
             Title = "Edit task",
             Content = form,
             PrimaryButtonText = "Save",
@@ -426,6 +461,7 @@ internal sealed class BoardWindow : Window
         };
 
         editing = true;
+        activeDialog = dialog;
         try
         {
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
@@ -435,6 +471,7 @@ internal sealed class BoardWindow : Window
         }
         finally
         {
+            activeDialog = null;
             editing = false;
         }
     }

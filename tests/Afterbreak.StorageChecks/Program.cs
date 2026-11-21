@@ -24,6 +24,10 @@ internal static class Program
             CheckCaptureMigration(temporary.FullName);
             Console.WriteLine("PASS capture preferences migration preserves v1/v2 tasks and existing reminder state");
             CapturePreferenceChecks.Run(temporary.FullName);
+            CheckAppearancePolicy();
+            Console.WriteLine("PASS appearance policy for theme, contrast, transparency, motion and text scaling");
+            CheckAppearanceMigration(temporary.FullName);
+            Console.WriteLine("PASS appearance upgrade and rollback preserve task order, archive, shortcut, guide and reminder records");
         }
         finally
         {
@@ -159,7 +163,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 3L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 4L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -233,12 +237,12 @@ internal static class Program
         var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 3, true,
             TimeSpan.FromSeconds(7), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         new TaskStore(path).SaveReminders(reminders, checkpoint);
-        ExecuteSql(path, "DROP TABLE capture_preferences; PRAGMA user_version = 2;");
+        ExecuteSql(path, "DROP TABLE appearance_preferences; DROP TABLE capture_preferences; PRAGMA user_version = 2;");
         var savedReminderRow = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 3L && TaskFingerprint(path) == fingerprint &&
+        Require(Scalar(path, "PRAGMA user_version") is 4L && TaskFingerprint(path) == fingerprint &&
             Equals(savedReminderRow, Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1")),
             "Migration leaves the existing task and reminder rows byte-identical.");
         Require(CaptureShortcut.TryParse("Ctrl+Shift+F5", out var shortcut), "A test shortcut can be parsed.");
@@ -256,6 +260,69 @@ internal static class Program
         Require(File.ReadAllBytes(blocked).SequenceEqual(bytes) && Scalar(blocked, "PRAGMA user_version") is 1L &&
             Scalar(blocked, "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'reminder_state'") is 0L,
             "A failed v1-to-v3 upgrade rolls back the intermediate reminder DDL.");
+    }
+
+    private static void CheckAppearancePolicy()
+    {
+        var system = new AppearanceSystem(false, true, true, 1, 0xFFFFFF, 0x000000);
+        var state = AppearancePolicy.Resolve(AppearancePreferences.Default, system);
+        Require(state.Theme == AppearanceTheme.System && state.Scene == BreakScene.Dusk && state.ShowScene &&
+            state.UseMaterials && state.AnimateScene && state.ScaleWidth(460) == 460 && state.ScaleHeight(165) == 165,
+            "default follows Windows and shows the dusk scene with allowed effects");
+        var choices = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
+        state = AppearancePolicy.Resolve(choices, system with { Animations = false, TextScale = 2 });
+        Require(state.Theme == AppearanceTheme.Dark && state.Scene == BreakScene.Daylight && !state.AnimateScene && state.UseMaterials &&
+            state.ScaleWidth(460) == 620 && state.ScaleHeight(165) == 380, "reduced motion and text scale do not override the scene or material");
+
+        state = AppearancePolicy.Resolve(choices, system with { Transparency = false });
+        Require(!state.UseMaterials && state.ShowScene && state.AnimateScene, "transparency off leaves an opaque still scene with separately allowed entrance motion");
+        foreach (var palette in new[] { (Window: 0x030615u, Text: 0xFCFFFFu), (Window: 0xFFFFD1u, Text: 0x083421u) })
+        {
+            state = AppearancePolicy.Resolve(choices, system with { HighContrast = true, WindowColor = palette.Window, TextColor = palette.Text });
+            Require(state.Theme == AppearanceTheme.System && !state.ShowScene && !state.AnimateScene && !state.UseMaterials &&
+                state.WindowColor == palette.Window && state.TextColor == palette.Text, "contrast overrides app theme and uses either supplied system palette");
+        }
+        state = AppearancePolicy.Resolve(choices, system with { TextScale = double.NaN });
+        Require(state.TextScale == 1, "an unavailable scale uses normal dimensions");
+    }
+
+    private static void CheckAppearanceMigration(string folder)
+    {
+        var path = Path.Combine(folder, "appearance-v3.db");
+        CreateSchemaOne(path);
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true, ShortSeconds = 9 };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 2, false,
+            TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        store.SaveReminders(settings, checkpoint);
+        Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid preference shortcut fixture");
+        store.SaveCaptureShortcut(shortcut);
+        store.DismissCaptureGuide();
+        ExecuteSql(path, "DROP TABLE appearance_preferences; PRAGMA user_version = 3;");
+        var tasks = TaskFingerprint(path);
+        var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
+        var reminder = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
+
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 4L,
+            "v3 upgrade defaults to System/Dusk");
+        var choice = new AppearancePreferences(AppearanceTheme.Light, BreakScene.Daylight);
+        store.SaveAppearance(choice);
+        Require(new TaskStore(path).LoadAppearance() == choice && TaskFingerprint(path) == tasks &&
+            Equals(capture, Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1")) &&
+            Equals(reminder, Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1")),
+            "saving appearance leaves all existing task and preference rows unchanged");
+        ExecuteSql(path, "CREATE TRIGGER reject_appearance BEFORE UPDATE ON appearance_preferences BEGIN SELECT RAISE(ABORT, 'write failure'); END;");
+        ExpectStorageError(() => store.SaveAppearance(new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Dusk)));
+        Require(new TaskStore(path).LoadAppearance() == choice, "a failed write preserves the complete prior appearance pair");
+
+        var blocked = Path.Combine(folder, "appearance-conflict.db");
+        CreateSchemaOne(blocked);
+        ExecuteSql(blocked, "CREATE TABLE appearance_preferences (keep TEXT); INSERT INTO appearance_preferences VALUES ('original');");
+        var bytes = File.ReadAllBytes(blocked);
+        ExpectStorageError(() => new TaskStore(blocked).LoadAppearance());
+        Require(File.ReadAllBytes(blocked).SequenceEqual(bytes) && Scalar(blocked, "PRAGMA user_version") is 1L &&
+            Scalar(blocked, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('capture_preferences', 'reminder_state')") is 0L,
+            "a failed latest-schema upgrade rolls back intermediate preference DDL");
     }
 
     private static object? Scalar(string path, string sql)

@@ -16,6 +16,7 @@ internal static class Program
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
             CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
+            CheckAppearanceSettings(Path.Combine(temporary.FullName, "appearance.db"));
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
         finally
@@ -254,6 +255,8 @@ internal static class Program
         var original = ReminderSettings.Default with { Enabled = true, WorkSeconds = 64, TimerOnly = true };
         var store = new TaskStore(path);
         store.SaveReminders(original, new ReminderScheduler(clock, original).Checkpoint());
+        var savedAppearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
+        store.SaveAppearance(savedAppearance);
         var connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
         using (var blocker = new SqliteConnection(connectionString))
         {
@@ -272,6 +275,11 @@ internal static class Program
             "a transient startup read failure never overwrites saved settings with fallback defaults");
         tray.Send(TrayCommand.Settings);
         Check(SettingsWindow.Current.LoadedSettings == original, "opening settings retries the failed load");
+        Check(WindowAppearance.Current.Preferences == AppearancePreferences.Default && store.LoadAppearance() == savedAppearance,
+            "startup appearance read failure uses temporary defaults without persisting them");
+        tray.Send(TrayCommand.Appearance);
+        Check(AppearanceSettingsWindow.Current.Preferences == savedAppearance && WindowAppearance.Current.Preferences == savedAppearance,
+            "opening Appearance retries the read and restores the complete saved preference pair");
         tray.Send(TrayCommand.Quit);
     }
 
@@ -335,5 +343,63 @@ internal static class Program
         _ = new AfterbreakSession(new DispatcherQueue(), () => { }, new TaskStore(path), clock);
         Check(Desktop.Current.CaptureBinding.Active?.ToString() == "Ctrl+Shift+7", "startup re-registers the persisted shortcut");
         Desktop.Current.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckAppearanceSettings(string path)
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var queue = new DispatcherQueue();
+        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        var tray = Desktop.Current;
+        var appearance = WindowAppearance.Current;
+        var timer = queue.Timers[1];
+
+        void Tick(int seconds)
+        {
+            for (var second = 0; second < seconds; second++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                timer.Fire();
+            }
+        }
+
+        Tick(18);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 7, "scheduled break is partly over before Appearance opens");
+        tray.Send(TrayCommand.Appearance);
+        var window = AppearanceSettingsWindow.Current;
+        Tick(20);
+        Check(window.IsVisible && !BreakWindow.Current.IsVisible && appearance.Preferences == AppearancePreferences.Default,
+            "Appearance defers scheduled display without replacing applied settings");
+        var selected = new AppearancePreferences(AppearanceTheme.Light, BreakScene.Daylight);
+        using (var blocker = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
+        {
+            blocker.Open();
+            using var locked = blocker.BeginTransaction();
+            Check(!window.Save(selected) && appearance.Preferences == AppearancePreferences.Default && window.IsVisible,
+                "a failed appearance write leaves the current appearance applied and the form available");
+            locked.Rollback();
+        }
+        var beforeSave = store.LoadReminders();
+        Check(window.Save(selected) && appearance.Preferences == selected && new TaskStore(path).LoadAppearance() == selected &&
+            store.LoadReminders() == beforeSave, "successful appearance save applies the preference and leaves the reminder checkpoint intact");
+        tray.Send(TrayCommand.Capture, window.Handle);
+        CaptureWindow.Current.Input = "Keep the draft";
+        tray.Send(TrayCommand.Appearance);
+        Check(CaptureWindow.Current.Input == "Keep the draft" && CaptureWindow.Current.IsVisible,
+            "opening Appearance while capturing leaves the capture draft intact");
+        CaptureWindow.Current.Cancel();
+        Check(SurfaceWindow.Returned == window.Handle, "capture returns to Appearance");
+        window.Hide();
+        timer.Fire();
+        Check(WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10, "Appearance resumes a partial break with a fresh warning");
+        Tick(10);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 7, "appearance changes keep the remaining break time");
+        Tick(7);
+        Check(store.LoadReminders().Checkpoint?.CompletedShorts == 1, "the resumed break advances cadence only on completion");
+        tray.Send(TrayCommand.Quit);
+        Check(appearance.Disposed && window.Closed, "Quit disposes appearance tracking and closes its window");
     }
 }

@@ -14,8 +14,12 @@ internal sealed partial class AfterbreakSession
     private readonly Action exit;
     private readonly TaskStore tasks;
     private readonly CaptureOptions captureOptions;
+    private readonly WindowAppearance appearance;
     private BoardWindow? board;
     private CaptureSettingsWindow? captureSettings;
+    private AppearanceSettingsWindow? appearanceSettings;
+    private AppearancePreferences appearancePreferences = AppearancePreferences.Default;
+    private bool appearanceLoadFailed;
     private Surface visible;
     private BreakLayout previewLayout;
     private long startedAt;
@@ -38,6 +42,11 @@ internal sealed partial class AfterbreakSession
         captureOptions = new CaptureOptions(this.tasks, desktop.CaptureBinding);
         captureOptions.Load();
         desktop.RefreshShortcutTip();
+        LoadAppearance();
+        appearance = new WindowAppearance(dispatcher, capture, appearancePreferences);
+        appearance.Track(capture, SurfaceMaterial.Capture);
+        appearance.Track(warning, SurfaceMaterial.Warning);
+        appearance.Track(preview, SurfaceMaterial.Break);
         InitializeReminders(dispatcher, reminderClock ?? new ReminderClock());
     }
 
@@ -53,6 +62,21 @@ internal sealed partial class AfterbreakSession
     {
         switch (command)
         {
+            case TrayCommand.Appearance:
+                DismissBreakForSettings(preserveSchedule: true);
+                if (appearanceLoadFailed && appearanceSettings?.AppWindow.IsVisible != true)
+                {
+                    LoadAppearance();
+                    appearance.Apply(appearancePreferences);
+                }
+                if (appearanceSettings is null)
+                {
+                    appearanceSettings = new AppearanceSettingsWindow(SaveAppearance);
+                    appearance.Track(appearanceSettings, SurfaceMaterial.Mica);
+                }
+                desktop.AppearanceHandle = appearanceSettings.Handle;
+                appearanceSettings.Show(source, appearancePreferences, appearanceLoadFailed);
+                break;
             case TrayCommand.CaptureSettings:
                 DismissBreakForSettings(preserveSchedule: true);
                 if (captureOptions.LoadFailed && captureSettings?.AppWindow.IsVisible != true)
@@ -60,7 +84,11 @@ internal sealed partial class AfterbreakSession
                     captureOptions.Load();
                     desktop.RefreshShortcutTip();
                 }
-                captureSettings ??= new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide);
+                if (captureSettings is null)
+                {
+                    captureSettings = new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide);
+                    appearance.Track(captureSettings, SurfaceMaterial.Mica);
+                }
                 desktop.CaptureSettingsHandle = captureSettings.Handle;
                 captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status);
                 break;
@@ -70,7 +98,11 @@ internal sealed partial class AfterbreakSession
                 {
                     TryLoadReminderSettings();
                 }
-                reminderSettings ??= new SettingsWindow(SaveSettings);
+                if (reminderSettings is null)
+                {
+                    reminderSettings = new SettingsWindow(SaveSettings);
+                    appearance.Track(reminderSettings, SurfaceMaterial.Mica);
+                }
                 desktop.SettingsHandle = reminderSettings.Handle;
                 reminderSettings.Show(source, reminders.Settings, desktop.ReminderStatus, reminderStorageError);
                 break;
@@ -90,7 +122,11 @@ internal sealed partial class AfterbreakSession
                     Dismiss();
                 }
 
-                board ??= new BoardWindow(tasks, () => Execute(TrayCommand.Capture, desktop.BoardHandle));
+                if (board is null)
+                {
+                    board = new BoardWindow(tasks, () => Execute(TrayCommand.Capture, desktop.BoardHandle));
+                    appearance.Track(board, SurfaceMaterial.Mica);
+                }
                 desktop.BoardHandle = board.Handle;
                 board.Show(source);
                 break;
@@ -138,6 +174,7 @@ internal sealed partial class AfterbreakSession
                     PersistCheckpoint();
                 }
                 Dismiss();
+                appearance.Dispose();
                 desktop.Dispose();
                 capture.Close();
                 warning.Close();
@@ -145,9 +182,43 @@ internal sealed partial class AfterbreakSession
                 board?.CloseForQuit();
                 reminderSettings?.CloseForQuit();
                 captureSettings?.CloseForQuit();
+                appearanceSettings?.CloseForQuit();
                 exit();
                 break;
         }
+    }
+
+    private void LoadAppearance()
+    {
+        try
+        {
+            appearancePreferences = tasks.LoadAppearance();
+            appearanceLoadFailed = false;
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            appearanceLoadFailed = true;
+        }
+    }
+
+    private bool SaveAppearance(AppearancePreferences preferences)
+    {
+        if (appearanceLoadFailed || !preferences.IsValid)
+        {
+            return false;
+        }
+
+        try
+        {
+            tasks.SaveAppearance(preferences);
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            return false;
+        }
+        appearancePreferences = preferences;
+        appearance.Apply(preferences);
+        return true;
     }
 
     private void DismissBreakForSettings(bool preserveSchedule = false)
@@ -289,6 +360,7 @@ internal sealed partial class AfterbreakSession
                 warning.AppWindow.Hide();
                 break;
             case Surface.Preview:
+                preview.StopSceneEntrance();
                 SurfaceWindow.HideAndReturn(preview, returnWindow);
                 break;
         }

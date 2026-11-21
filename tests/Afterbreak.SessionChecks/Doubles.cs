@@ -34,7 +34,7 @@ namespace Microsoft.UI.Dispatching
 
 namespace Afterbreak
 {
-    internal enum TrayCommand { Capture, Preview, EndBreak, Quit, PreviewSampleBoard, Tasks, Settings, TogglePause, Snooze, Skip, CaptureSettings }
+    internal enum TrayCommand { Capture, Preview, EndBreak, Quit, PreviewSampleBoard, Tasks, Settings, TogglePause, Snooze, Skip, CaptureSettings, Appearance }
     internal enum BreakLayout { Compact, SampleBoard }
 
     internal sealed class Desktop
@@ -47,6 +47,7 @@ namespace Afterbreak
         public nint BoardHandle { get; set; }
         public nint SettingsHandle { get; set; }
         public nint CaptureSettingsHandle { get; set; }
+        public nint AppearanceHandle { get; set; }
         public CaptureBinding CaptureBinding { get; } = new((_, _) => true, _ => true);
         public bool PreviewAvailable { get; set; } = true;
         public bool MenuOpen { get; set; }
@@ -153,6 +154,7 @@ namespace Afterbreak
         public bool IsLong { get; private set; }
         public int Seconds { get; private set; }
         public bool HasForeground => IsVisible;
+        public void StopSceneEntrance() { }
 
         public void Show(nint source, BreakLayout layout, string? task, string? note = null, bool longBreak = false)
         {
@@ -238,6 +240,40 @@ namespace Afterbreak
         }
 
         public void SetStatus(string description) { }
+        public void CloseForQuit() => Close();
+    }
+
+    internal sealed class WindowAppearance : IDisposable
+    {
+        public WindowAppearance(Microsoft.UI.Dispatching.DispatcherQueue dispatcher, TestSurface anchor, AppearancePreferences preferences)
+        {
+            Current = this;
+            Preferences = preferences;
+        }
+
+        public static WindowAppearance Current { get; private set; } = null!;
+        public AppearancePreferences Preferences { get; private set; }
+        public bool Disposed { get; private set; }
+
+        public void Track(TestSurface surface, SurfaceMaterial material) { }
+        public void Apply(AppearancePreferences preferences) => Preferences = preferences;
+        public void Dispose() => Disposed = true;
+    }
+
+    internal sealed class AppearanceSettingsWindow(Func<AppearancePreferences, bool> save) : TestSurface
+    {
+        public static AppearanceSettingsWindow Current { get; private set; } = null!;
+        public nint Handle => 303;
+        public Func<AppearancePreferences, bool> Save { get; } = save;
+        public AppearancePreferences? Preferences { get; private set; }
+
+        public void Show(nint source, AppearancePreferences preferences, bool loadFailed)
+        {
+            Current = this;
+            Preferences = preferences;
+            IsVisible = true;
+        }
+
         public void CloseForQuit() => Close();
     }
 }

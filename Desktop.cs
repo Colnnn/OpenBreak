@@ -17,6 +17,7 @@ internal enum TrayCommand
     Snooze,
     Skip,
     CaptureSettings,
+    Appearance,
 }
 
 internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
@@ -95,6 +96,7 @@ internal sealed class Desktop : IDisposable
     internal nint BoardHandle { get; set; }
     internal nint SettingsHandle { get; set; }
     internal nint CaptureSettingsHandle { get; set; }
+    internal nint AppearanceHandle { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
     internal bool MenuOpen { get; private set; }
     internal bool SnoozeAvailable { get; set; }
@@ -218,7 +220,8 @@ internal sealed class Desktop : IDisposable
 
     private void ObserveWorkWindow(nint candidate)
     {
-        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle || candidate == CaptureSettingsHandle))
+        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle ||
+            candidate == CaptureSettingsHandle || candidate == AppearanceHandle))
         {
             lastOwnWorkWindow = candidate;
         }
@@ -280,6 +283,7 @@ internal sealed class Desktop : IDisposable
             AppendMenu(menu, 0, (nuint)TrayCommand.Capture,
                 CaptureBinding.Active is { } active ? $"Capture task\t{active}" : "Capture task");
             AppendMenu(menu, 0, (nuint)TrayCommand.CaptureSettings, "Capture settings");
+            AppendMenu(menu, 0, (nuint)TrayCommand.Appearance, "Appearance");
             var previewFlags = PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None ? 0u : 1u; // MF_GRAYED
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.Preview, "Preview a break");
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");

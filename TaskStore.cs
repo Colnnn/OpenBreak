@@ -16,7 +16,7 @@ internal sealed partial class TaskStore(string path)
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -221,6 +221,7 @@ internal sealed partial class TaskStore(string path)
             CREATE INDEX task_order ON tasks (archived, status, position, id);
             {ReminderTable}
             {CaptureTable}
+            {AppearanceTable}
             PRAGMA application_id = {ApplicationId};
             PRAGMA user_version = {SchemaVersion};
             """);
@@ -236,11 +237,11 @@ internal sealed partial class TaskStore(string path)
         }
 
         var version = ReadPragma(connection, null, "PRAGMA user_version");
-        if (version is 1 or 2)
+        if (version is >= 1 and < SchemaVersion)
         {
             using var transaction = connection.BeginTransaction();
             version = ReadPragma(connection, transaction, "PRAGMA user_version");
-            if (version is 1 or 2)
+            if (version is >= 1 and < SchemaVersion)
             {
                 if (ReadPragma(connection, transaction, "PRAGMA application_id") != ApplicationId)
                 {
@@ -254,15 +255,22 @@ internal sealed partial class TaskStore(string path)
                 using var tasks = Command(connection, transaction,
                     "SELECT id, title, next_step, status, position, archived FROM tasks LIMIT 0");
                 using (tasks.ExecuteReader()) { }
-                if (version == 2)
+                if (version >= 2)
                 {
                     using var reminders = Command(connection, transaction,
                         "SELECT id, settings, checkpoint FROM reminder_state LIMIT 0");
                     using (reminders.ExecuteReader()) { }
                 }
+                if (version >= 3)
+                {
+                    using var capture = Command(connection, transaction,
+                        "SELECT id, shortcut, guide_dismissed FROM capture_preferences LIMIT 0");
+                    using (capture.ExecuteReader()) { }
+                }
                 using var migration = Command(connection, transaction, $"""
                     {(version == 1 ? ReminderTable : "")}
-                    {CaptureTable}
+                    {(version <= 2 ? CaptureTable : "")}
+                    {AppearanceTable}
                     PRAGMA user_version = {SchemaVersion};
                     """);
                 migration.ExecuteNonQuery();

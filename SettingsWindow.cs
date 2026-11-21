@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
@@ -21,14 +20,15 @@ internal sealed class SettingsWindow : Window
     private readonly Func<ReminderSettings, bool> save;
     private bool placed;
     private bool quitting;
+    private double textScale = 1;
 
     internal SettingsWindow(Func<ReminderSettings, bool> save)
     {
         this.save = save;
         Title = "Afterbreak · Reminder settings";
-        SystemBackdrop = new MicaBackdrop();
 
         var title = SurfaceStyle.Label("Reminder settings", 27, FontWeights.SemiBold);
+        title.TextWrapping = TextWrapping.Wrap;
         var cadence = SurfaceStyle.SecondaryLabel("A long break follows three completed short breaks.", 13);
         cadence.TextWrapping = TextWrapping.Wrap;
         var privacy = SurfaceStyle.SecondaryLabel("Pause for presentation from the tray whenever you share your screen.", 13);
@@ -41,15 +41,7 @@ internal sealed class SettingsWindow : Window
         times.Children.Add(start);
         Grid.SetColumn(end, 1);
         times.Children.Add(end);
-        times.SizeChanged += (_, args) =>
-        {
-            var stack = args.NewSize.Width < 440;
-            times.RowSpacing = stack ? 8 : 0;
-            Grid.SetColumnSpan(start, stack ? 2 : 1);
-            Grid.SetColumn(end, stack ? 0 : 1);
-            Grid.SetColumnSpan(end, stack ? 2 : 1);
-            Grid.SetRow(end, stack ? 1 : 0);
-        };
+        times.SizeChanged += (_, _) => LayoutTimes();
         hours.Toggled += (_, _) => times.Visibility = hours.IsOn ? Visibility.Visible : Visibility.Collapsed;
 
         var saveButton = new Button { Content = "Save settings", HorizontalAlignment = HorizontalAlignment.Right };
@@ -73,7 +65,7 @@ internal sealed class SettingsWindow : Window
         form.Children.Add(privacy);
         form.Children.Add(error);
         form.Children.Add(saveButton);
-        Content = new ScrollViewer { Content = form, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        Content = SurfaceStyle.Scroll(form);
         AppWindow.Closing += (_, args) =>
         {
             if (!quitting)
@@ -85,6 +77,25 @@ internal sealed class SettingsWindow : Window
     }
 
     internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+    internal void ApplyAppearance(AppearanceState state)
+    {
+        if (textScale != state.TextScale)
+        {
+            textScale = state.TextScale;
+            LayoutTimes();
+        }
+    }
+
+    private void LayoutTimes()
+    {
+        var stack = times.ActualWidth < 440 * textScale;
+        times.RowSpacing = stack ? 8 : 0;
+        Grid.SetColumnSpan(start, stack ? 2 : 1);
+        Grid.SetColumn(end, stack ? 0 : 1);
+        Grid.SetColumnSpan(end, stack ? 2 : 1);
+        Grid.SetRow(end, stack ? 1 : 0);
+    }
 
     internal void Show(nint source, ReminderSettings settings, string description, bool storageError)
     {

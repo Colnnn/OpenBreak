@@ -15,6 +15,7 @@ internal static class Program
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
+            new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
         finally
         {

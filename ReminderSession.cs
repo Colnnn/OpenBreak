@@ -37,7 +37,7 @@ internal sealed partial class AfterbreakSession
                 EndVisibleBreak();
             }
         };
-        lastCheckpoint = Environment.TickCount64;
+        lastCheckpoint = reminderClock.GetTimestamp();
         TryLoadReminderSettings();
     }
 
@@ -105,7 +105,7 @@ internal sealed partial class AfterbreakSession
                 Dismiss();
             }
             if (checkpointDirty || phase != reminders.Phase || pauses != reminders.PausedBy ||
-                Environment.TickCount64 - lastCheckpoint >= CheckpointInterval.TotalMilliseconds)
+                reminderClock.GetElapsedTime(lastCheckpoint) >= CheckpointInterval)
             {
                 PersistCheckpoint();
             }
@@ -137,10 +137,13 @@ internal sealed partial class AfterbreakSession
 
             var task = intended == Surface.Preview && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
             var systemPause = desktop.GetSystemPause(checkPresentation: true);
+            var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
             reminders.StartVisibleCountdown();
-            if (systemPause != ReminderPause.None || IsEditingOrPreviewing())
+            // Working hours may have ended during persistence or task lookup.
+            reminders.Update(environment);
+            if (reminders.Phase != phase || reminders.PausedBy != ReminderPause.None)
             {
-                reminders.Update(systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None));
+                checkpointDirty = true;
                 return;
             }
 
@@ -280,7 +283,7 @@ internal sealed partial class AfterbreakSession
         try
         {
             tasks.SaveReminders(settings, checkpoint);
-            lastCheckpoint = Environment.TickCount64;
+            lastCheckpoint = reminderClock.GetTimestamp();
             checkpointDirty = false;
             reminderStorageError = false;
             return true;

@@ -116,8 +116,9 @@ namespace Afterbreak
 
     internal sealed class WarningWindow : TestSurface
     {
-        public WarningWindow(Action snooze, Action skip) { }
+        public WarningWindow(Action snooze, Action skip) => Current = this;
 
+        public static WarningWindow Current { get; private set; } = null!;
         public static int Shows { get; private set; }
         public static int Seconds { get; private set; }
         public static string? Kind { get; private set; }
@@ -135,12 +136,15 @@ namespace Afterbreak
 
     internal sealed class BreakWindow : TestSurface
     {
-        public BreakWindow(Action dismiss) { }
+        public BreakWindow(Action dismiss) => Current = this;
 
+        public static BreakWindow Current { get; private set; } = null!;
         public static int Shows { get; private set; }
         public static string? Text { get; private set; }
         public static string? Note { get; private set; }
         public static BreakLayout Layout { get; private set; }
+        public bool IsLong { get; private set; }
+        public int Seconds { get; private set; }
         public bool HasForeground => IsVisible;
 
         public void Show(nint source, BreakLayout layout, string? task, string? note = null, bool longBreak = false)
@@ -149,10 +153,11 @@ namespace Afterbreak
             Text = task;
             Note = note;
             Layout = layout;
+            IsLong = longBreak;
             IsVisible = true;
         }
 
-        public void Update(int seconds) { }
+        public void Update(int seconds) => Seconds = seconds;
     }
 
     internal sealed class BoardWindow : TestSurface

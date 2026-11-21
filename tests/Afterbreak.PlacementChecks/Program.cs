@@ -43,3 +43,13 @@ Check(!MonitorPlacement.HasReachableCaption(new PixelRect(-910, 100, 1000, 600),
     "caption buttons alone do not count as a reachable drag area");
 Check(MonitorPlacement.Recover(primary, new PixelRect(-3800, -300, 800, 600), center: true) == new PixelRect(560, 220, 800, 600) &&
     MonitorPlacement.Recover(tiny, spanning, center: true) == tiny, "an offscreen window recenters and clamps to the recovered work area");
+
+var trayDisplay = new PixelRect(-1600, -900, 1600, 860);
+Check(MonitorPlacement.Place(trayDisplay, 324, 400, 1.5, anchor: new PixelRect(-60, -34, 24, 24)) ==
+    new PixelRect(-522, -646, 486, 600), "tray flyout anchors above a bottom taskbar on a scaled negative-origin display");
+var topTaskbarArea = new PixelRect(0, 40, 1920, 1040);
+Check(MonitorPlacement.Place(topTaskbarArea, 324, 400, 1, anchor: new PixelRect(1840, 8, 24, 24)) ==
+    new PixelRect(1540, 40, 324, 400), "tray flyout anchors below a top taskbar");
+Check(MonitorPlacement.Place(tiny, 600, 750, 2, anchor: new PixelRect(-3, 45, 1, 1)) == tiny &&
+    MonitorPlacement.Place(primary, 324, 400, 1, anchor: default(PixelRect)) is null,
+    "tray flyout clamps to tiny work areas and rejects an invalid anchor");

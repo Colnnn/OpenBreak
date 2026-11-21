@@ -86,7 +86,8 @@ internal sealed partial class AfterbreakSession
 
         // The shell treats our own full-screen break as busy on some displays. Check again on
         // explicit system notifications or after the break loses foreground, and before every show.
-        var checkPresentation = recheckPresentation || visible != Surface.Preview || !preview.HasForeground;
+        var checkPresentation = recheckPresentation || visible != Surface.Preview ||
+            (!preview.HasForeground && !desktop.TrayFlyoutHasForeground);
         var systemPause = desktop.GetSystemPause(checkPresentation);
         if (!scheduledSurface && visible is (Surface.Warning or Surface.Preview) &&
             (systemPause != ReminderPause.None || reminders.ManuallyPaused))
@@ -353,5 +354,6 @@ internal sealed partial class AfterbreakSession
             phase == ReminderPhase.Snoozed ? "Reminders on · Snoozed" :
             phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval";
         reminderSettings?.SetStatus(desktop.ReminderStatus);
+        desktop.RefreshTrayFlyout();
     }
 }

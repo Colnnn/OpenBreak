@@ -34,11 +34,12 @@ namespace Microsoft.UI.Dispatching
 
 namespace Afterbreak
 {
-    internal enum TrayCommand { Capture, Preview, EndBreak, Quit, PreviewSampleBoard, Tasks, Settings, TogglePause, Snooze, Skip, CaptureSettings, Appearance }
     internal enum BreakLayout { Compact, SampleBoard }
 
     internal sealed class Desktop
     {
+        private Func<nint, Action<TrayCommand>>? bindTrayCommand;
+
         public Desktop(Microsoft.UI.Dispatching.DispatcherQueue dispatcher) => Current = this;
 
         public static Desktop Current { get; private set; } = null!;
@@ -51,6 +52,9 @@ namespace Afterbreak
         public CaptureBinding CaptureBinding { get; } = new((_, _) => true, _ => true);
         public bool PreviewAvailable { get; set; } = true;
         public bool MenuOpen { get; set; }
+        public bool TrayMenuHasFocus { get; set; }
+        public bool TrayFlyoutHasForeground => MenuOpen && TrayMenuHasFocus;
+        public bool LastPresentationCheck { get; private set; }
         public bool SnoozeAvailable { get; set; }
         public bool SkipAvailable { get; set; }
         public bool ManuallyPaused { get; set; }
@@ -61,8 +65,26 @@ namespace Afterbreak
         public event Action? EligibilityChanged;
         public event Action? DisplaysChanged;
 
-        public ReminderPause GetSystemPause(bool checkPresentation) => CheckSystemPause?.Invoke() ?? SystemPause;
+        public ReminderPause GetSystemPause(bool checkPresentation)
+        {
+            LastPresentationCheck = checkPresentation;
+            return CheckSystemPause?.Invoke() ?? SystemPause;
+        }
         public nint WorkWindow() => 30;
+        public void ConfigureTrayFlyout(WindowAppearance appearance, Func<nint, Action<TrayCommand>> bindCommand) =>
+            bindTrayCommand = bindCommand;
+        public Action<TrayCommand> OpenTray(nint source)
+        {
+            MenuOpen = true;
+            var dispatch = bindTrayCommand!(source);
+            return command =>
+            {
+                DismissTray();
+                dispatch(command);
+            };
+        }
+        public void DismissTray() => MenuOpen = false;
+        public void RefreshTrayFlyout() { }
         public void Send(TrayCommand command, nint source = 10) => Command?.Invoke(command, source);
         public void ChangeEligibility() => EligibilityChanged?.Invoke();
         public void ChangeDisplays() => DisplaysChanged?.Invoke();
@@ -205,7 +227,8 @@ namespace Afterbreak
         public static BreakLayout Layout { get; private set; }
         public bool IsLong { get; private set; }
         public int Seconds { get; private set; }
-        public bool HasForeground => IsVisible;
+        public bool Foreground { get; set; } = true;
+        public bool HasForeground => IsVisible && Foreground;
         public bool CanPlace { get; set; } = true;
         public bool RetainedDisplayAvailable { get; set; } = true;
         public bool PlacementIsCurrent => IsVisible && RetainedDisplayAvailable;

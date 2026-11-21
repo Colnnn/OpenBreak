@@ -39,7 +39,7 @@ internal sealed partial class AfterbreakSession
         timer.Tick += Tick;
 
         desktop = new Desktop(dispatcher);
-        desktop.Command += Execute;
+        desktop.Command += (command, source) => Execute(command, source);
         captureOptions = new CaptureOptions(this.tasks, desktop.CaptureBinding);
         captureOptions.Load();
         desktop.RefreshShortcutTip();
@@ -48,6 +48,7 @@ internal sealed partial class AfterbreakSession
         appearance.Track(capture, SurfaceMaterial.Capture);
         appearance.Track(warning, SurfaceMaterial.Warning);
         appearance.Track(preview, SurfaceMaterial.Break);
+        desktop.ConfigureTrayFlyout(appearance, BindTrayCommand);
         InitializeReminders(dispatcher, reminderClock ?? new ReminderClock());
     }
 
@@ -59,7 +60,15 @@ internal sealed partial class AfterbreakSession
         Preview,
     }
 
-    private void Execute(TrayCommand command, nint source)
+    private readonly record struct CaptureBookmark(BoardWindow.CardFocus? Card);
+
+    private Action<TrayCommand> BindTrayCommand(nint source)
+    {
+        var bookmark = new CaptureBookmark(FocusedBoardCard(source));
+        return command => Execute(command, source, bookmark);
+    }
+
+    private void Execute(TrayCommand command, nint source, CaptureBookmark? bookmark = null)
     {
         switch (command)
         {
@@ -132,13 +141,14 @@ internal sealed partial class AfterbreakSession
                 board.Show(source);
                 break;
             case TrayCommand.Capture:
+                desktop.DismissTray();
                 if (visible == Surface.Capture)
                 {
                     var previousSource = returnWindow;
                     var previousCardFocus = captureCardFocus;
                     if (source != 0 && source != returnWindow)
                     {
-                        SetCaptureSource(source);
+                        SetCaptureSource(source, bookmark);
                     }
                     if (!capture.BringBack(returnWindow))
                     {
@@ -150,7 +160,7 @@ internal sealed partial class AfterbreakSession
 
                 StopScheduledSurfaceForInput();
                 Dismiss();
-                SetCaptureSource(source);
+                SetCaptureSource(source, bookmark);
                 if (!capture.TryShow(source))
                 {
                     Dismiss();
@@ -267,10 +277,13 @@ internal sealed partial class AfterbreakSession
         timer.Start();
     }
 
-    private void SetCaptureSource(nint source)
+    private BoardWindow.CardFocus? FocusedBoardCard(nint source) =>
+        board is not null && source == board.Handle ? board.GetFocusedCard() : null;
+
+    private void SetCaptureSource(nint source, CaptureBookmark? bookmark)
     {
         returnWindow = source;
-        captureCardFocus = board is not null && source == board.Handle ? board.GetFocusedCard() : null;
+        captureCardFocus = bookmark is { } captured ? captured.Card : FocusedBoardCard(source);
     }
 
     private void Tick(DispatcherQueueTimer sender, object args)
@@ -283,7 +296,8 @@ internal sealed partial class AfterbreakSession
         {
             return;
         }
-        if (!ManualPreviewAllowed(checkPresentation: visible != Surface.Preview || !preview.HasForeground))
+        if (!ManualPreviewAllowed(checkPresentation: visible != Surface.Preview ||
+            (!preview.HasForeground && !desktop.TrayFlyoutHasForeground)))
         {
             Dismiss();
             return;
@@ -396,5 +410,6 @@ internal sealed partial class AfterbreakSession
         }
         returnWindow = 0;
         captureCardFocus = null;
+        desktop.RefreshTrayFlyout();
     }
 }

@@ -6,22 +6,6 @@ using Microsoft.UI.Windowing;
 
 namespace Afterbreak;
 
-internal enum TrayCommand
-{
-    Capture = 1,
-    Preview,
-    EndBreak,
-    Quit,
-    PreviewSampleBoard,
-    Tasks,
-    Settings,
-    TogglePause,
-    Snooze,
-    Skip,
-    CaptureSettings,
-    Appearance,
-}
-
 internal sealed class Desktop : IDisposable
 {
     private const uint TrayMessage = 0x8001;
@@ -34,6 +18,9 @@ internal sealed class Desktop : IDisposable
     private const uint SessionChange = 0x02B1;
     private const uint SelectNotification = 0x0400;
     private const uint KeyboardSelectNotification = 0x0401;
+    private const uint LeftButtonUp = 0x0202;
+    private const uint RightButtonUp = 0x0205;
+    private const uint TrayIconId = 1;
     private const uint NoRepeat = 0x4000;
     private const uint ForegroundEvent = 3;
     private const string WindowClass = "Afterbreak.Tray";
@@ -47,10 +34,15 @@ internal sealed class Desktop : IDisposable
     private readonly bool sessionNotifications;
     private readonly DispatcherQueue dispatcher;
     private readonly DisplayAreaWatcher? displayWatcher;
+    private readonly TrayMenuLifetime trayMenu = new();
     private readonly uint process = (uint)Environment.ProcessId;
     private nint lastWorkWindow;
     private nint lastOwnWorkWindow;
     private bool iconAdded;
+    private bool versionFourIcon;
+    private TrayFlyoutWindow? trayFlyout;
+    private WindowAppearance? trayAppearance;
+    private Func<nint, Action<TrayCommand>>? bindTrayCommand;
     private bool locked;
     private bool disconnected;
     private bool suspended;
@@ -103,7 +95,8 @@ internal sealed class Desktop : IDisposable
     internal nint CaptureSettingsHandle { get; set; }
     internal nint AppearanceHandle { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
-    internal bool MenuOpen { get; private set; }
+    internal bool MenuOpen => trayMenu.Current is not null;
+    internal bool TrayFlyoutHasForeground => MenuOpen && trayFlyout?.HasForeground == true;
     internal bool SnoozeAvailable { get; set; }
     internal bool SkipAvailable { get; set; }
     internal bool ManuallyPaused { get; set; }
@@ -111,6 +104,12 @@ internal sealed class Desktop : IDisposable
     internal event Action<TrayCommand, nint>? Command;
     internal event Action? EligibilityChanged;
     internal event Action? DisplaysChanged;
+
+    internal void ConfigureTrayFlyout(WindowAppearance appearance, Func<nint, Action<TrayCommand>> bindCommand)
+    {
+        trayAppearance = appearance;
+        bindTrayCommand = bindCommand;
+    }
 
     internal ReminderPause GetSystemPause(bool checkPresentation)
     {
@@ -214,6 +213,8 @@ internal sealed class Desktop : IDisposable
     public void Dispose()
     {
         disposed = true;
+        DismissTray();
+        trayFlyout?.CloseForQuit();
         if (displayWatcher is not null)
         {
             RemoveDisplayHandlers(displayWatcher);
@@ -277,6 +278,7 @@ internal sealed class Desktop : IDisposable
     {
         if (!disposed)
         {
+            DismissIfTrayPlacementInvalid();
             DisplaysChanged?.Invoke();
         }
     });
@@ -319,10 +321,11 @@ internal sealed class Desktop : IDisposable
         data.CallbackMessage = TrayMessage;
         data.Icon = LoadIcon(0, 32516); // Shared system information icon.
         iconAdded = ShellNotifyIcon(0, ref data);
+        versionFourIcon = false;
         if (iconAdded)
         {
             data.Version = 4;
-            ShellNotifyIcon(4, ref data);
+            versionFourIcon = ShellNotifyIcon(4, ref data);
         }
     }
 
@@ -340,72 +343,152 @@ internal sealed class Desktop : IDisposable
     {
         Size = (uint)Marshal.SizeOf<NotifyIconData>(),
         Window = window,
-        Id = 1,
+        Id = TrayIconId,
         Tip = CaptureBinding.Active is { } active ? $"Afterbreak · {active}" : "Afterbreak · Shortcut unavailable",
         Info = "",
         InfoTitle = "",
     };
 
-    private void ShowMenu()
+    private TrayMenuState CurrentTrayMenu() => new(CaptureBinding.Active?.ToString(),
+        PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None,
+        DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable);
+
+    internal void RefreshTrayFlyout()
     {
-        var source = WorkWindow();
-        var menu = CreatePopupMenu();
-        if (menu == 0)
+        if (MenuOpen)
+        {
+            trayFlyout?.UpdateMenu(CurrentTrayMenu());
+        }
+    }
+
+    private void ShowMenu(uint notification, nuint coordinates)
+    {
+        if (disposed || trayAppearance is null || bindTrayCommand is null ||
+            GetSystemPause(checkPresentation: false) != ReminderPause.None)
         {
             return;
         }
-
-        TrayCommand command;
-        MenuOpen = true;
-        try
+        if (MenuOpen)
         {
-            AppendMenu(menu, 0, (nuint)TrayCommand.Tasks, "Open Tasks");
-            AppendMenu(menu, 0, (nuint)TrayCommand.Capture,
-                CaptureBinding.Active is { } active ? $"Capture task\t{active}" : "Capture task");
-            AppendMenu(menu, 0, (nuint)TrayCommand.CaptureSettings, "Capture settings");
-            AppendMenu(menu, 0, (nuint)TrayCommand.Appearance, "Appearance");
-            var previewFlags = PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None ? 0u : 1u; // MF_GRAYED
-            AppendMenu(menu, previewFlags, (nuint)TrayCommand.Preview, "Preview a break");
-            AppendMenu(menu, previewFlags, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
-            if (DismissLabel is { } dismissLabel)
-            {
-                AppendMenu(menu, 0, (nuint)TrayCommand.EndBreak, dismissLabel);
-            }
-            AppendMenu(menu, 0x0800, 0, null);
-            AppendMenu(menu, 1, 0, ReminderStatus);
-            AppendMenu(menu, 0, (nuint)TrayCommand.Settings, "Reminder settings");
-            AppendMenu(menu, 0, (nuint)TrayCommand.TogglePause,
-                ManuallyPaused ? "Resume after presentation" : "Pause for presentation");
-            if (SnoozeAvailable)
-            {
-                AppendMenu(menu, 0, (nuint)TrayCommand.Snooze, "Snooze 5 min");
-            }
-            if (SkipAvailable)
-            {
-                AppendMenu(menu, 0, (nuint)TrayCommand.Skip, "Skip break");
-            }
-            AppendMenu(menu, 0x0800, 0, null);
-            AppendMenu(menu, 0, (nuint)TrayCommand.Quit, "Quit Afterbreak");
-
-            GetCursorPos(out var cursor);
-            SetForegroundWindow(window);
-            command = (TrayCommand)TrackPopupMenu(menu, 0x0102, cursor.X, cursor.Y, 0, window, 0);
-            PostMessage(window, 0, 0, 0);
-        }
-        finally
-        {
-            MenuOpen = false;
-            DestroyMenu(menu);
+            DismissTray();
+            return;
         }
 
-        if (GetForegroundWindow() == window || !IsWorkWindow(GetForegroundWindow()))
+        var source = WorkWindow();
+        if (TrayAnchor(source, notification, coordinates) is not { } anchor)
         {
-            ReturnTo(source);
+            return;
         }
-        if (command != 0)
+        if (trayFlyout is null)
         {
-            Command?.Invoke(command, source);
+            trayFlyout = new TrayFlyoutWindow();
+            trayAppearance.Track(trayFlyout, SurfaceMaterial.Tray);
         }
+        var opening = new TrayOpening(source, bindTrayCommand(source));
+        trayFlyout.Prepare(CurrentTrayMenu(), item => SelectTrayAction(opening, item),
+            restoreSource => CloseTray(opening, restoreSource));
+        if (!trayFlyout.TryPlace(anchor))
+        {
+            trayFlyout.Hide();
+            return;
+        }
+
+        trayMenu.Open(opening);
+        if (!trayFlyout.TryShow())
+        {
+            CloseTray(opening, restoreSource: false);
+        }
+    }
+
+    private PixelRect? TrayAnchor(nint source, uint notification, nuint coordinates)
+    {
+        var identifier = new NotifyIconIdentifier { Size = (uint)Marshal.SizeOf<NotifyIconIdentifier>(), Window = window, Id = TrayIconId };
+        if (Shell_NotifyIconGetRect(ref identifier, out var icon) == 0 &&
+            PixelRect.FromEdges(icon.Left, icon.Top, icon.Right, icon.Bottom) is { } rectangle && MonitorForRect(rectangle) != 0)
+        {
+            return rectangle;
+        }
+        // WM_CONTEXTMENU does not carry version-four coordinates and may come from the keyboard.
+        if (versionFourIcon && notification is SelectNotification or KeyboardSelectNotification)
+        {
+            var point = new PixelRect(unchecked((short)coordinates), unchecked((short)(coordinates >> 16)), 1, 1);
+            if (MonitorForRect(point) != 0)
+            {
+                return point;
+            }
+        }
+        if (!versionFourIcon && notification is LeftButtonUp or RightButtonUp && GetCursorPos(out var cursor))
+        {
+            var point = new PixelRect(cursor.X, cursor.Y, 1, 1);
+            if (MonitorForRect(point) != 0)
+            {
+                return point;
+            }
+        }
+        var area = MonitorArea(MonitorForWindow(source), workArea: true) ?? MonitorArea(PrimaryMonitor(), workArea: true);
+        return area is { } bounds ? new PixelRect(bounds.X + bounds.Width - 1, bounds.Y + bounds.Height - 1, 1, 1) : null;
+    }
+
+    private void SelectTrayAction(TrayOpening opening, TrayMenuItem item)
+    {
+        if (!ReferenceEquals(trayMenu.Current, opening) || !TrayFlyoutHasForeground)
+        {
+            return;
+        }
+        if (trayFlyout?.PlacementIsCurrent != true || GetSystemPause(checkPresentation: false) != ReminderPause.None)
+        {
+            CloseTray(opening, restoreSource: false);
+            return;
+        }
+        if (CurrentTrayMenu().CanInvoke(item) && CloseTray(opening, restoreSource: item.Command != TrayCommand.Quit))
+        {
+            opening.Dispatch(item.Command);
+        }
+    }
+
+    private bool CloseTray(TrayOpening opening, bool restoreSource)
+    {
+        if (!trayMenu.TryClose(opening))
+        {
+            return false;
+        }
+
+        if (restoreSource && trayFlyout?.HasForeground == true)
+        {
+            ReturnTo(opening.Source);
+        }
+        trayFlyout?.Hide();
+        return true;
+    }
+
+    internal void DismissTray()
+    {
+        if (trayMenu.Current is { } opening)
+        {
+            CloseTray(opening, restoreSource: false);
+        }
+    }
+
+    private void DismissIfTrayPlacementInvalid()
+    {
+        if (trayMenu.Current is { } opening && trayFlyout?.PlacementIsCurrent == false)
+        {
+            CloseTray(opening, restoreSource: false);
+        }
+    }
+
+    private void CaptureFromShortcut()
+    {
+        if (trayMenu.Current is { } opening && TrayFlyoutHasForeground)
+        {
+            if (CloseTray(opening, restoreSource: trayFlyout?.PlacementIsCurrent == true))
+            {
+                opening.Dispatch(TrayCommand.Capture);
+            }
+            return;
+        }
+        DismissTray();
+        Command?.Invoke(TrayCommand.Capture, WorkWindow());
     }
 
     private nint HandleMessage(nint hwnd, uint message, nuint wParam, nint lParam)
@@ -419,6 +502,10 @@ internal sealed class Desktop : IDisposable
                 case 7: locked = true; break;
                 case 8: locked = false; suspended = false; break;
             }
+            if (locked || disconnected)
+            {
+                DismissTray();
+            }
             EligibilityChanged?.Invoke();
             return 0;
         }
@@ -426,6 +513,10 @@ internal sealed class Desktop : IDisposable
         {
             // Automatic wake may be unattended. Wait for a user resume or session unlock.
             suspended = wParam != 7;
+            if (suspended)
+            {
+                DismissTray();
+            }
             EligibilityChanged?.Invoke();
             return 1;
         }
@@ -435,6 +526,7 @@ internal sealed class Desktop : IDisposable
         }
         if (message is SettingChange or TimeChange)
         {
+            DismissIfTrayPlacementInvalid();
             EligibilityChanged?.Invoke();
         }
         if (message == DisplayChange)
@@ -446,17 +538,26 @@ internal sealed class Desktop : IDisposable
             var keys = unchecked((uint)lParam);
             if (CaptureBinding.Matches(wParam, keys & 0xffff, keys >> 16, unchecked((uint)GetMessageTime())))
             {
-                Command?.Invoke(TrayCommand.Capture, WorkWindow());
+                CaptureFromShortcut();
             }
             return 0;
         }
-        if (message == TrayMessage && ((uint)(nuint)lParam & 0xFFFF) is ContextMenu or SelectNotification or KeyboardSelectNotification)
+        if (message == TrayMessage && iconAdded)
         {
-            ShowMenu();
+            var packed = (uint)(nuint)lParam;
+            var notification = packed & 0xFFFF;
+            var invoke = versionFourIcon
+                ? (packed >> 16) == TrayIconId && notification is ContextMenu or SelectNotification or KeyboardSelectNotification
+                : wParam == TrayIconId && notification is LeftButtonUp or RightButtonUp;
+            if (invoke)
+            {
+                ShowMenu(notification, wParam);
+            }
             return 0;
         }
         if (message == taskbarCreated && taskbarCreated != 0)
         {
+            DismissTray();
             AddIcon();
             return 0;
         }
@@ -500,6 +601,15 @@ internal sealed class Desktop : IDisposable
         internal uint InfoFlags;
         internal Guid Guid;
         internal nint BalloonIcon;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NotifyIconIdentifier
+    {
+        internal uint Size;
+        internal nint Window;
+        internal uint Id;
+        internal Guid Guid;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -554,18 +664,10 @@ internal sealed class Desktop : IDisposable
     [DllImport("user32.dll")]
     private static extern bool CloseDesktop(nint desktop);
     private static bool ShellNotifyIcon(uint message, ref NotifyIconData data) => Shell_NotifyIcon(message, ref data);
-    [DllImport("user32.dll")]
-    private static extern nint CreatePopupMenu();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool AppendMenu(nint menu, uint flags, nuint id, string? text);
-    [DllImport("user32.dll")]
-    private static extern uint TrackPopupMenu(nint menu, uint flags, int x, int y, int reserved, nint window, nint rectangle);
-    [DllImport("user32.dll")]
-    private static extern bool DestroyMenu(nint menu);
+    [DllImport("shell32.dll")]
+    private static extern int Shell_NotifyIconGetRect(ref NotifyIconIdentifier identifier, out Rect iconLocation);
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Point point);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool PostMessage(nint window, uint message, nuint wParam, nint lParam);
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")]

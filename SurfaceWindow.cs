@@ -39,12 +39,21 @@ internal static class SurfaceWindow
             TryPlaceIn(window, previous.Monitor, area, widthDip, heightDip, out placement, atCorner: true);
     }
 
-    private static bool TryPlaceIn(Window window, nint monitor, PixelRect area, int widthDip, int heightDip, out SurfacePlacement placement, bool atCorner)
+    internal static bool TryPlaceTray(Window window, PixelRect anchor, int widthDip, int heightDip, out SurfacePlacement placement)
+    {
+        placement = default;
+        var monitor = Desktop.MonitorForRect(anchor);
+        return Desktop.MonitorArea(monitor, workArea: true) is { } area &&
+            TryPlaceIn(window, monitor, area, widthDip, heightDip, out placement, atCorner: false, anchor);
+    }
+
+    private static bool TryPlaceIn(Window window, nint monitor, PixelRect area, int widthDip, int heightDip,
+        out SurfacePlacement placement, bool atCorner, PixelRect? anchor = null)
     {
         placement = default;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Desktop.MonitorForWindow(hwnd) == monitor ? Desktop.OwnedWindowScale(hwnd) : Desktop.MonitorScale(monitor);
-        if (MonitorPlacement.Place(area, widthDip, heightDip, scale, atCorner) is not { } provisional ||
+        if (MonitorPlacement.Place(area, widthDip, heightDip, scale, atCorner, anchor) is not { } provisional ||
             !MoveIfNeeded(hwnd, provisional) || Desktop.MonitorForWindow(hwnd) != monitor)
         {
             return false;
@@ -52,7 +61,7 @@ internal static class SurfaceWindow
 
         // Measure the owned PerMonitorV2 window on the target display, never the invoking app.
         var actualScale = Desktop.OwnedWindowScale(hwnd);
-        if (MonitorPlacement.Place(area, widthDip, heightDip, actualScale, atCorner) is not { } exact ||
+        if (MonitorPlacement.Place(area, widthDip, heightDip, actualScale, atCorner, anchor) is not { } exact ||
             !MoveIfNeeded(hwnd, exact))
         {
             return false;
@@ -168,7 +177,7 @@ internal static class SurfaceWindow
         return false;
     }
 
-    internal static void ShowCapture(Window window)
+    internal static void ShowAndActivate(Window window)
     {
         window.Activate();
         if (!window.AppWindow.IsVisible)

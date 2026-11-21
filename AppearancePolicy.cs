@@ -2,7 +2,7 @@ namespace Afterbreak;
 
 internal enum AppearanceTheme { System, Light, Dark }
 internal enum BreakScene { Dusk, Daylight }
-internal enum SurfaceMaterial { Mica, Capture, Warning, Break }
+internal enum SurfaceMaterial { Mica, Capture, Warning, Break, Tray }
 
 internal sealed record AppearancePreferences(AppearanceTheme Theme, BreakScene Scene)
 {

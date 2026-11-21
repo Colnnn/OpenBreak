@@ -13,6 +13,7 @@ internal static class Program
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
+            CheckTrayMenuPolicy();
             CheckCaptureMotionStudy(Path.Combine(temporary.FullName, "motion-study.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
@@ -25,6 +26,39 @@ internal static class Program
         {
             temporary.Delete(recursive: true);
         }
+    }
+
+    private static void CheckTrayMenuPolicy()
+    {
+        var state = new TrayMenuState("Ctrl + Alt + K", false, null, "Reminders off", false, false, false);
+        var items = state.Items();
+        Check(items.Where(item => item.Visible).Select(item => item.Command).SequenceEqual(
+            [TrayCommand.Tasks, TrayCommand.Capture, TrayCommand.CaptureSettings, TrayCommand.Appearance,
+                TrayCommand.Preview, TrayCommand.PreviewSampleBoard, TrayCommand.Settings, TrayCommand.TogglePause, TrayCommand.Quit]) &&
+            items.Single(item => item.Command == TrayCommand.Capture).Label == "Capture task · Ctrl + Alt + K" &&
+            !state.CanInvoke(items.Single(item => item.Command == TrayCommand.Preview)),
+            "tray model preserves command order and shortcut label, with unavailable previews disabled");
+
+        var active = state with { DismissLabel = "Cancel preview", SnoozeAvailable = true, SkipAvailable = true };
+        Check(active.Items().Where(item => item.Selectable).Select(item => item.Command).Contains(TrayCommand.Snooze) &&
+            !state.CanInvoke(active.Items().Single(item => item.Command == TrayCommand.Snooze)) &&
+            !state.CanInvoke(active.Items().Single(item => item.Command == TrayCommand.Skip)),
+            "tray model revalidates transient Snooze and Skip commands against current availability");
+        Check(!(active with { DismissLabel = "End break" }).CanInvoke(
+            active.Items().Single(item => item.Command == TrayCommand.EndBreak)) &&
+            !(state with { ManuallyPaused = true }).CanInvoke(items.Single(item => item.Command == TrayCommand.TogglePause)),
+            "a stale Cancel preview or Pause selection cannot invoke a changed command");
+
+        var lifecycle = new TrayMenuLifetime();
+        Action<TrayCommand> dispatch = _ => { };
+        var first = new TrayOpening(700, dispatch);
+        var next = new TrayOpening(700, dispatch);
+        lifecycle.Open(first);
+        Check(lifecycle.Current?.Source == 700 && lifecycle.TryClose(first) && lifecycle.Current is null &&
+            !lifecycle.TryClose(first), "a tray dismissal clears the original source and dispatch opportunity once");
+        lifecycle.Open(next);
+        Check(!lifecycle.TryClose(first) && ReferenceEquals(lifecycle.Current, next) && lifecycle.TryClose(next),
+            "late callbacks cannot close even a new tray opening with the same source");
     }
 
     private static void CheckCaptureMotionStudy(string path)
@@ -191,6 +225,24 @@ internal static class Program
         Check(BreakWindow.Shows == shownBreaks && !queue.Timer.Running, "cancelled warning never opens break");
 
         CheckCaptureFocus(tray, board, capture, store.List(archived: false).Single().Id);
+
+        var trayEdit = new BoardWindow.CardFocus(store.List(archived: false)[0].Id, BoardWindow.CardAction.Edit);
+        board.FocusedCard = trayEdit;
+        var traySelect = tray.OpenTray(board.Handle);
+        board.FocusedCard = null;
+        traySelect(TrayCommand.Capture);
+        Check(capture.Save("Capture from tray flyout") && !tray.MenuOpen && SurfaceWindow.Returned == board.Handle &&
+            board.LastRefreshFocus == trayEdit, "tray capture uses the card focus saved before flyout activation");
+
+        Preview();
+        BreakWindow.Current.Foreground = false;
+        tray.MenuOpen = true;
+        tray.TrayMenuHasFocus = true;
+        queue.Timer.Fire();
+        Check(!tray.LastPresentationCheck && BreakWindow.Current.IsVisible,
+            "opening our tray over a preview preserves its presentation exemption");
+        tray.ChangeEligibility();
+        Check(tray.LastPresentationCheck, "explicit Windows eligibility changes still recheck presentation over a tray");
 
         tray.Send(TrayCommand.Quit);
         Check(didQuit && tray.Disposed && capture.Closed && board.Closed, "quit closes board and capture and disposes desktop");

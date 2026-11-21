@@ -178,7 +178,7 @@ internal sealed class CaptureWindow : Window
 
     private void ShowInput()
     {
-        SurfaceWindow.ShowCapture(this);
+        SurfaceWindow.ShowAndActivate(this);
         FocusDraftField();
     }
 

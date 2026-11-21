@@ -63,7 +63,7 @@ internal sealed class WindowAppearance : IDisposable
             return ((BreakWindow)window).ApplyAppearance;
         }
 
-        var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning;
+        var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray;
         var panel = frame ? (Border)window.Content : new Border
         {
             Style = (Style)Application.Current.Resources["AfterbreakOpaqueBackdropStyle"],
@@ -79,7 +79,7 @@ internal sealed class WindowAppearance : IDisposable
         SystemBackdrop? backdrop = material switch
         {
             SurfaceMaterial.Mica when MicaController.IsSupported() => new MicaBackdrop(),
-            SurfaceMaterial.Capture when DesktopAcrylicController.IsSupported() => new DesktopAcrylicBackdrop(),
+            SurfaceMaterial.Capture or SurfaceMaterial.Tray when DesktopAcrylicController.IsSupported() => new DesktopAcrylicBackdrop(),
             _ => null,
         };
 
@@ -119,6 +119,9 @@ internal sealed class WindowAppearance : IDisposable
                     break;
                 case WarningWindow warning:
                     warning.ApplyAppearance(state);
+                    break;
+                case TrayFlyoutWindow tray:
+                    tray.ApplyAppearance(state);
                     break;
                 case BoardWindow board:
                     board.ApplyAppearance(state, panel.RequestedTheme);

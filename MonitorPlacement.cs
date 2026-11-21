@@ -20,7 +20,7 @@ internal readonly record struct SurfacePlacement(nint Monitor, PixelRect Area, P
 
 internal static class MonitorPlacement
 {
-    internal static PixelRect? Place(PixelRect area, int widthDip, int heightDip, double scale, bool atCorner = false)
+    internal static PixelRect? Place(PixelRect area, int widthDip, int heightDip, double scale, bool atCorner = false, PixelRect? anchor = null)
     {
         if (!area.IsValid || widthDip <= 0 || heightDip <= 0 || !double.IsFinite(scale) || scale <= 0)
         {
@@ -29,6 +29,19 @@ internal static class MonitorPlacement
 
         var width = (int)Math.Clamp(Math.Round(widthDip * scale), 1, area.Width);
         var height = (int)Math.Clamp(Math.Round(heightDip * scale), 1, area.Height);
+        if (anchor is { } trayIcon)
+        {
+            if (!trayIcon.IsValid)
+            {
+                return null;
+            }
+            var gap = Pixels(8, scale, area.Height);
+            var above = (long)trayIcon.Y - height - gap;
+            var below = (long)trayIcon.Y + trayIcon.Height + gap;
+            var xAtIcon = (long)trayIcon.X + trayIcon.Width - width;
+            return new PixelRect((int)Math.Clamp(xAtIcon, area.X, (long)area.X + area.Width - width),
+                (int)Math.Clamp(above >= area.Y ? above : below, area.Y, (long)area.Y + area.Height - height), width, height);
+        }
         var inset = Math.Round(20 * scale);
         var spaceX = area.Width - width;
         var spaceY = area.Height - height;

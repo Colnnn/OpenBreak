@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
@@ -11,6 +12,10 @@ namespace Afterbreak;
 
 internal sealed class BoardWindow : Window
 {
+    internal enum CardAction { Edit, Move, Restore }
+
+    internal readonly record struct CardFocus(long TaskId, CardAction Action, FocusState State);
+
     private const string DragFormat = "Afterbreak.BoardTask";
     private static readonly (TaskStatus Status, string Label)[] Columns =
     [
@@ -27,7 +32,7 @@ internal sealed class BoardWindow : Window
     private readonly ScrollViewer scroll;
     private readonly InfoBar error;
     private readonly Button retry;
-    private readonly Dictionary<long, Control> taskActions = [];
+    private readonly Dictionary<(long TaskId, CardAction Action), Control> taskActions = [];
     private readonly Border[] lanes = new Border[Columns.Length];
     private bool archived;
     private bool placed;
@@ -147,6 +152,35 @@ internal sealed class BoardWindow : Window
         Close();
     }
 
+    internal CardFocus? GetFocusedCard()
+    {
+        if (root.XamlRoot is { } xamlRoot && FocusManager.GetFocusedElement(xamlRoot) is Control focused)
+        {
+            foreach (var (key, action) in taskActions)
+            {
+                if (ReferenceEquals(action, focused))
+                {
+                    return new CardFocus(key.TaskId, key.Action, focused.FocusState);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    internal void RefreshAfterCapture(CardFocus? previousFocus)
+    {
+        Refresh();
+        if (previousFocus is { } card)
+        {
+            var key = (card.TaskId, card.Action);
+            var focus = taskActions.GetValueOrDefault(key, archiveButton);
+            var state = card.State == FocusState.Keyboard ? FocusState.Keyboard : FocusState.Programmatic;
+            FocusWhenReady(focus, state, () => !editing && AppWindow.IsVisible && Desktop.IsForeground(Handle) &&
+                ReferenceEquals(taskActions.GetValueOrDefault(key, archiveButton), focus));
+        }
+    }
+
     internal void Refresh()
     {
         try
@@ -240,7 +274,7 @@ internal sealed class BoardWindow : Window
             AutomationProperties.SetName(restore, $"Restore {task.Title}");
             restore.Click += (_, _) => ApplyChange(() => store.SetArchived(task.Id, archived: false));
             actions.Children.Add(restore);
-            taskActions.Add(task.Id, restore);
+            taskActions.Add((task.Id, CardAction.Restore), restore);
         }
         else
         {
@@ -248,10 +282,11 @@ internal sealed class BoardWindow : Window
             AutomationProperties.SetName(edit, $"Edit {task.Title}");
             edit.Click += async (_, _) => await EditTask(task);
             actions.Children.Add(edit);
+            taskActions.Add((task.Id, CardAction.Edit), edit);
             var move = new DropDownButton { Content = "Move", Flyout = CreateMoveMenu(task, canMoveUp, canMoveDown) };
             AutomationProperties.SetName(move, $"Move {task.Title}");
             actions.Children.Add(move);
-            taskActions.Add(task.Id, move);
+            taskActions.Add((task.Id, CardAction.Move), move);
         }
         body.Children.Add(actions);
 
@@ -419,10 +454,15 @@ internal sealed class BoardWindow : Window
     private void RefreshAndFocus(long? id)
     {
         Refresh();
-        var focus = id is long taskId && taskActions.TryGetValue(taskId, out var action) ? action : archiveButton;
+        var focus = id is long taskId ? taskActions.GetValueOrDefault((taskId, CardAction.Move), archiveButton) : archiveButton;
+        FocusWhenReady(focus, FocusState.Programmatic);
+    }
+
+    private static void FocusWhenReady(Control focus, FocusState state, Func<bool>? canFocus = null)
+    {
         if (focus.IsLoaded)
         {
-            focus.Focus(FocusState.Programmatic);
+            TryFocus();
             return;
         }
 
@@ -430,7 +470,15 @@ internal sealed class BoardWindow : Window
         void FocusWhenLoaded(object sender, RoutedEventArgs args)
         {
             focus.Loaded -= FocusWhenLoaded;
-            focus.Focus(FocusState.Programmatic);
+            TryFocus();
+        }
+
+        void TryFocus()
+        {
+            if (canFocus?.Invoke() != false)
+            {
+                focus.Focus(state);
+            }
         }
     }
 

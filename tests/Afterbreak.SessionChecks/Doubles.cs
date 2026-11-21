@@ -75,11 +75,13 @@ namespace Afterbreak
         public CaptureWindow(Func<string, bool> save, Action cancel)
         {
             Save = save;
+            Cancel = cancel;
             Current = this;
         }
 
         public static CaptureWindow Current { get; private set; } = null!;
         public Func<string, bool> Save { get; }
+        public Action Cancel { get; }
         public int Shows { get; private set; }
         public string Input { get; set; } = "";
 
@@ -129,6 +131,10 @@ namespace Afterbreak
 
     internal sealed class BoardWindow : TestSurface
     {
+        internal enum CardAction { Edit, Move }
+
+        internal readonly record struct CardFocus(long TaskId, CardAction Action);
+
         public BoardWindow(TaskStore store, Action? addTask = null)
         {
             Current = this;
@@ -139,9 +145,18 @@ namespace Afterbreak
         public int Refreshes { get; private set; }
         public nint Handle => 300;
         public Action? AddTask { get; }
+        public CardFocus? FocusedCard { get; set; }
+        public CardFocus? LastRefreshFocus { get; private set; }
 
         public void Show(nint source) => IsVisible = true;
-        public void Refresh() => Refreshes++;
+        public CardFocus? GetFocusedCard() => FocusedCard;
+
+        public void RefreshAfterCapture(CardFocus? previousFocus)
+        {
+            Refreshes++;
+            LastRefreshFocus = previousFocus;
+        }
+
         public void CloseForQuit() => Close();
     }
 }

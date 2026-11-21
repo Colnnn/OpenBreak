@@ -18,6 +18,7 @@ internal sealed class AfterbreakSession
     private BreakLayout previewLayout;
     private long startedAt;
     private nint returnWindow;
+    private BoardWindow.CardFocus? captureCardFocus;
 
     internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null)
     {
@@ -59,16 +60,16 @@ internal sealed class AfterbreakSession
             case TrayCommand.Capture:
                 if (visible == Surface.Capture)
                 {
-                    if (source != 0)
+                    if (source != 0 && source != returnWindow)
                     {
-                        returnWindow = source;
+                        SetCaptureSource(source);
                     }
                     capture.BringBack(returnWindow);
                     return;
                 }
 
                 Dismiss();
-                returnWindow = source;
+                SetCaptureSource(source);
                 visible = Surface.Capture;
                 desktop.PreviewAvailable = false;
                 capture.Show(source);
@@ -111,6 +112,12 @@ internal sealed class AfterbreakSession
     {
         startedAt = Stopwatch.GetTimestamp();
         timer.Start();
+    }
+
+    private void SetCaptureSource(nint source)
+    {
+        returnWindow = source;
+        captureCardFocus = board is not null && source == board.Handle ? board.GetFocusedCard() : null;
     }
 
     private void Tick(DispatcherQueueTimer sender, object args)
@@ -170,10 +177,11 @@ internal sealed class AfterbreakSession
             return false;
         }
 
+        var cardFocus = captureCardFocus;
         Dismiss();
         if (board?.AppWindow.IsVisible == true)
         {
-            board.Refresh();
+            board.RefreshAfterCapture(cardFocus);
         }
         return true;
     }
@@ -198,5 +206,6 @@ internal sealed class AfterbreakSession
                 break;
         }
         returnWindow = 0;
+        captureCardFocus = null;
     }
 }

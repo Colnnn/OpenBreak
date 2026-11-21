@@ -17,5 +17,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.34" />
+    <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 </Project>

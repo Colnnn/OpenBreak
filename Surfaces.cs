@@ -16,9 +16,9 @@ internal sealed class CaptureWindow : Window
 {
     private readonly TextBox input;
     private readonly TextBlock hint;
-    private readonly Action<string> save;
+    private readonly Func<string, bool> save;
 
-    internal CaptureWindow(Action<string> save, Action cancel)
+    internal CaptureWindow(Func<string, bool> save, Action cancel)
     {
         this.save = save;
         Title = "Afterbreak · Capture task";
@@ -26,7 +26,7 @@ internal sealed class CaptureWindow : Window
         input = new TextBox
         {
             PlaceholderText = "What would you like to come back to?",
-            MaxLength = 140,
+            MaxLength = TaskStore.TitleLimit,
         };
         AutomationProperties.SetName(input, "Task title");
         hint = SurfaceStyle.SecondaryLabel("Enter to save · Esc to cancel", 12);
@@ -109,7 +109,11 @@ internal sealed class CaptureWindow : Window
             return;
         }
 
-        save(value);
+        if (!save(value))
+        {
+            hint.Text = "Couldn’t save. Try again.";
+            input.Focus(FocusState.Programmatic);
+        }
     }
 }
 
@@ -163,7 +167,8 @@ internal sealed class BreakWindow : Window
 {
     private readonly TextBlock clock;
     private readonly TextBlock taskTitle;
-    private readonly Border taskCard;
+    private readonly TextBlock taskNote;
+    private readonly ScrollViewer compactTask;
     private readonly ScrollViewer sampleBoard;
     private readonly Grid body;
     private readonly Button end;
@@ -188,32 +193,26 @@ internal sealed class BreakWindow : Window
         taskTitle = SurfaceStyle.Label("", 21, FontWeights.SemiBold);
         taskTitle.Foreground = foreground;
         taskTitle.TextWrapping = TextWrapping.Wrap;
+        taskNote = SurfaceStyle.Label("", 15);
+        taskNote.Foreground = subdued;
+        taskNote.TextWrapping = TextWrapping.Wrap;
         var taskBody = new StackPanel { Spacing = 5 };
         taskBody.Children.Add(taskLabel);
         taskBody.Children.Add(taskTitle);
-        taskCard = new Border
+        taskBody.Children.Add(taskNote);
+        var taskCard = new Border
         {
             Background = SurfaceStyle.Brush(0x182E34, 240),
             BorderBrush = SurfaceStyle.Brush(0xABC6BB, 100),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(18, 13, 18, 15),
-            Margin = new Thickness(0, 19, 0, 0),
             Child = taskBody,
         };
 
-        sampleBoard = new ScrollViewer
-        {
-            Content = CreateSampleBoard(foreground),
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            HorizontalScrollMode = ScrollMode.Disabled,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollMode = ScrollMode.Enabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            IsTabStop = true,
-            Margin = new Thickness(0, 19, 0, 0),
-            Visibility = Visibility.Collapsed,
-        };
+        compactTask = BreakContent(taskCard);
+        sampleBoard = BreakContent(CreateSampleBoard(foreground));
+        sampleBoard.Visibility = Visibility.Collapsed;
         AutomationProperties.SetName(sampleBoard, "Sample board");
 
         end = new Button
@@ -242,8 +241,8 @@ internal sealed class BreakWindow : Window
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.Children.Add(heading);
-        Grid.SetRow(taskCard, 1);
-        body.Children.Add(taskCard);
+        Grid.SetRow(compactTask, 1);
+        body.Children.Add(compactTask);
         Grid.SetRow(sampleBoard, 1);
         body.Children.Add(sampleBoard);
         Grid.SetRow(end, 2);
@@ -277,25 +276,25 @@ internal sealed class BreakWindow : Window
         };
     }
 
-    internal void SetPreview(BreakLayout layout, string? task)
+    internal void SetPreview(BreakLayout layout, string? task, string? nextStep = null)
     {
         Update(10);
         var showBoard = layout == BreakLayout.SampleBoard;
         taskTitle.Text = showBoard ? "" : task ?? "";
-        taskCard.Visibility = showBoard || task is null ? Visibility.Collapsed : Visibility.Visible;
+        taskNote.Text = showBoard || task is null ? "" : nextStep ?? "";
+        taskNote.Visibility = taskNote.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        compactTask.Visibility = showBoard || task is null ? Visibility.Collapsed : Visibility.Visible;
         sampleBoard.Visibility = showBoard ? Visibility.Visible : Visibility.Collapsed;
-        if (showBoard)
-        {
-            sampleBoard.ChangeView(null, 0, null, disableAnimation: true);
-        }
+        var content = showBoard ? sampleBoard : compactTask;
+        content.ChangeView(null, 0, null, disableAnimation: true);
         body.HorizontalAlignment = showBoard ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
         body.MaxWidth = showBoard ? 720 : 410;
         body.MinWidth = showBoard ? 0 : 250;
     }
 
-    internal void Show(nint source, BreakLayout layout, string? task)
+    internal void Show(nint source, BreakLayout layout, string? task, string? nextStep = null)
     {
-        SetPreview(layout, task);
+        SetPreview(layout, task, nextStep);
         SurfaceWindow.PlaceBreak(this, source);
         Activate();
         if (!AppWindow.IsVisible)
@@ -313,6 +312,18 @@ internal sealed class BreakWindow : Window
             clock.Text = value;
         }
     }
+
+    private static ScrollViewer BreakContent(UIElement content) => new()
+    {
+        Content = content,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        HorizontalScrollMode = ScrollMode.Disabled,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        VerticalScrollMode = ScrollMode.Enabled,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        IsTabStop = true,
+        Margin = new Thickness(0, 19, 0, 0),
+    };
 
     private static Border CreateSampleBoard(Brush foreground)
     {

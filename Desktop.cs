@@ -10,6 +10,7 @@ internal enum TrayCommand
     EndBreak,
     Quit,
     PreviewSampleBoard,
+    Tasks,
 }
 
 internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
@@ -33,6 +34,7 @@ internal sealed class Desktop : IDisposable
     private readonly nint foregroundHook;
     private readonly uint process = (uint)Environment.ProcessId;
     private nint lastWorkWindow;
+    private bool lastWorkWasBoard;
     private bool iconAdded;
 
     internal Desktop()
@@ -72,14 +74,17 @@ internal sealed class Desktop : IDisposable
 
     internal bool ShortcutAvailable { get; }
     internal string? DismissLabel { get; set; }
+    internal nint BoardHandle { get; set; }
+    internal bool PreviewAvailable { get; set; } = true;
     internal event Action<TrayCommand, nint>? Command;
 
     internal nint WorkWindow()
     {
         var active = GetForegroundWindow();
-        if (IsWorkWindow(active))
+        ObserveWorkWindow(active);
+        if (lastWorkWasBoard && IsWindowVisible(BoardHandle) && !IsIconic(BoardHandle))
         {
-            lastWorkWindow = active;
+            return BoardHandle;
         }
 
         return IsWindow(lastWorkWindow) ? lastWorkWindow : 0;
@@ -151,10 +156,18 @@ internal sealed class Desktop : IDisposable
     }
 
     private void RecordForeground(nint hook, uint eventId, nint candidate, int objectId, int childId, uint thread, uint time)
+        => ObserveWorkWindow(candidate);
+
+    private void ObserveWorkWindow(nint candidate)
     {
-        if (IsWorkWindow(candidate))
+        if (candidate != 0 && candidate == BoardHandle)
+        {
+            lastWorkWasBoard = true;
+        }
+        else if (IsWorkWindow(candidate))
         {
             lastWorkWindow = candidate;
+            lastWorkWasBoard = false;
         }
     }
 
@@ -194,9 +207,11 @@ internal sealed class Desktop : IDisposable
         TrayCommand command;
         try
         {
+            AppendMenu(menu, 0, (nuint)TrayCommand.Tasks, "Open Tasks");
             AppendMenu(menu, 0, (nuint)TrayCommand.Capture, ShortcutAvailable ? "Capture task\tCtrl+Alt+K" : "Capture task");
-            AppendMenu(menu, 0, (nuint)TrayCommand.Preview, "Preview a break");
-            AppendMenu(menu, 0, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
+            var previewFlags = PreviewAvailable ? 0u : 1u; // MF_GRAYED
+            AppendMenu(menu, previewFlags, (nuint)TrayCommand.Preview, "Preview a break");
+            AppendMenu(menu, previewFlags, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
             if (DismissLabel is { } dismissLabel)
             {
                 AppendMenu(menu, 0, (nuint)TrayCommand.EndBreak, dismissLabel);
@@ -341,6 +356,8 @@ internal sealed class Desktop : IDisposable
     private static extern bool SetForegroundWindow(nint window);
     [DllImport("user32.dll")]
     private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")]
     private static extern bool IsIconic(nint window);
     [DllImport("user32.dll")]

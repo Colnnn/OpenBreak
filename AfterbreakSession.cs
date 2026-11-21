@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
-using Microsoft.UI.Xaml;
 
 namespace Afterbreak;
 
@@ -13,15 +12,17 @@ internal sealed class AfterbreakSession
     private readonly BreakWindow preview;
     private readonly DispatcherQueueTimer timer;
     private readonly Action exit;
+    private readonly TaskStore tasks;
+    private BoardWindow? board;
     private Surface visible;
     private BreakLayout previewLayout;
     private long startedAt;
     private nint returnWindow;
-    private string? task;
 
-    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit)
+    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null)
     {
         this.exit = exit;
+        this.tasks = tasks ?? TaskStore.ForCurrentUser();
         capture = new CaptureWindow(SaveTask, Dismiss);
         warning = new WarningWindow();
         preview = new BreakWindow(Dismiss);
@@ -45,6 +46,16 @@ internal sealed class AfterbreakSession
     {
         switch (command)
         {
+            case TrayCommand.Tasks:
+                if (visible is Surface.Warning or Surface.Preview)
+                {
+                    Dismiss();
+                }
+
+                board ??= new BoardWindow(tasks, () => Execute(TrayCommand.Capture, desktop.BoardHandle));
+                desktop.BoardHandle = board.Handle;
+                board.Show(source);
+                break;
             case TrayCommand.Capture:
                 if (visible == Surface.Capture)
                 {
@@ -59,11 +70,12 @@ internal sealed class AfterbreakSession
                 Dismiss();
                 returnWindow = source;
                 visible = Surface.Capture;
+                desktop.PreviewAvailable = false;
                 capture.Show(source);
                 break;
             case TrayCommand.Preview:
             case TrayCommand.PreviewSampleBoard:
-                if (visible is Surface.Warning or Surface.Preview)
+                if (visible != Surface.None)
                 {
                     return;
                 }
@@ -72,6 +84,7 @@ internal sealed class AfterbreakSession
                 previewLayout = command == TrayCommand.Preview ? BreakLayout.Compact : BreakLayout.SampleBoard;
                 returnWindow = source;
                 visible = Surface.Warning;
+                desktop.PreviewAvailable = false;
                 desktop.DismissLabel = "Cancel preview";
                 warning.Show(returnWindow);
                 StartClock();
@@ -88,6 +101,7 @@ internal sealed class AfterbreakSession
                 capture.Close();
                 warning.Close();
                 preview.Close();
+                board?.CloseForQuit();
                 exit();
                 break;
         }
@@ -120,10 +134,11 @@ internal sealed class AfterbreakSession
         if (visible == Surface.Warning)
         {
             warning.AppWindow.Hide();
+            var task = previewLayout == BreakLayout.Compact ? GetReturnTask() : null;
             returnWindow = desktop.WorkWindow();
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
-            preview.Show(returnWindow, previewLayout, previewLayout == BreakLayout.Compact ? task : null);
+            preview.Show(returnWindow, previewLayout, task?.Title, task?.NextStep);
             StartClock();
         }
         else if (visible == Surface.Preview)
@@ -132,10 +147,35 @@ internal sealed class AfterbreakSession
         }
     }
 
-    private void SaveTask(string text)
+    private BoardTask? GetReturnTask()
     {
-        task = text;
+        try
+        {
+            return tasks.ReturnTask();
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            return null;
+        }
+    }
+
+    private bool SaveTask(string text)
+    {
+        try
+        {
+            tasks.Add(text);
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            return false;
+        }
+
         Dismiss();
+        if (board?.AppWindow.IsVisible == true)
+        {
+            board.Refresh();
+        }
+        return true;
     }
 
     private void Dismiss()
@@ -144,6 +184,7 @@ internal sealed class AfterbreakSession
         visible = Surface.None;
         timer.Stop();
         desktop.DismissLabel = null;
+        desktop.PreviewAvailable = true;
         switch (closing)
         {
             case Surface.Capture:

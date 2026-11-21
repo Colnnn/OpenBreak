@@ -6,7 +6,7 @@ internal sealed partial class AfterbreakSession
 {
     private sealed class ReminderClock : TimeProvider
     {
-        // On .NET 8 for Windows this monotonic counter includes time spent asleep.
+        // .NET 10 on Windows includes time spent asleep in TickCount64.
         public override long TimestampFrequency => 1000;
         public override long GetTimestamp() => Environment.TickCount64;
     }

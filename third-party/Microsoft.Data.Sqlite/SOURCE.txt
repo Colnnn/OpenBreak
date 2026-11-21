@@ -1,0 +1,3 @@
+Microsoft.Data.Sqlite 10.0.15 and Microsoft.Data.Sqlite.Core 10.0.15
+License file from the source revision listed in the NuGet packages.
+https://github.com/dotnet/dotnet/blob/8e0f8ed2312954727f8919d7d1c2f78b483b4ee7/src/efcore/LICENSE.txt

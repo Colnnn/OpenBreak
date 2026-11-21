@@ -1,0 +1,6 @@
+SQLitePCLRaw 2.1.13
+License and notices from the corresponding upstream release revision.
+https://github.com/ericsink/SQLitePCL.raw/tree/0873d14f6dcb3a8537444679468499ab9f5a782a
+
+The bundled SQLite engine is in the public domain.
+https://sqlite.org/copyright.html

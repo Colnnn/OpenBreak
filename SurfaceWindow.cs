@@ -1,6 +1,5 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
-using Windows.Graphics;
 
 namespace Afterbreak;
 
@@ -23,28 +22,150 @@ internal static class SurfaceWindow
         }
     }
 
-    internal static void Place(Window window, nint source, int width, int height, bool atCorner = false)
+    internal static bool TryPlace(Window window, nint source, int widthDip, int heightDip, out SurfacePlacement placement, bool atCorner = false)
     {
-        if (Desktop.MonitorArea(source, workArea: true) is not { } area)
+        placement = default;
+        if (DisplayFor(source, workArea: true) is not { } display)
         {
-            return;
+            return false;
         }
-
-        var w = Math.Min((int)Math.Round(width * area.Scale), area.Right - area.Left);
-        var h = Math.Min((int)Math.Round(height * area.Scale), area.Bottom - area.Top);
-        var inset = (int)Math.Round(20 * area.Scale);
-        var x = atCorner ? Math.Max(area.Left, area.Right - w - inset) : (area.Left + area.Right - w) / 2;
-        var y = atCorner ? Math.Max(area.Top, area.Bottom - h - inset) : (area.Top + area.Bottom - h) / 2;
-        window.AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
+        return TryPlaceIn(window, display.Monitor, display.Area, widthDip, heightDip, out placement, atCorner);
     }
 
-    internal static void PlaceBreak(Window window, nint source)
+    internal static bool TryRepositionWarning(Window window, SurfacePlacement previous, int widthDip, int heightDip, out SurfacePlacement placement)
     {
-        if (Desktop.MonitorArea(source, workArea: false) is { } area)
+        placement = default;
+        return Desktop.MonitorArea(previous.Monitor, workArea: true) is { } area &&
+            TryPlaceIn(window, previous.Monitor, area, widthDip, heightDip, out placement, atCorner: true);
+    }
+
+    private static bool TryPlaceIn(Window window, nint monitor, PixelRect area, int widthDip, int heightDip, out SurfacePlacement placement, bool atCorner)
+    {
+        placement = default;
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var scale = Desktop.MonitorForWindow(hwnd) == monitor ? Desktop.OwnedWindowScale(hwnd) : Desktop.MonitorScale(monitor);
+        if (MonitorPlacement.Place(area, widthDip, heightDip, scale, atCorner) is not { } provisional ||
+            !MoveIfNeeded(hwnd, provisional) || Desktop.MonitorForWindow(hwnd) != monitor)
         {
-            window.AppWindow.MoveAndResize(
-                new RectInt32(area.Left, area.Top, area.Right - area.Left, area.Bottom - area.Top));
+            return false;
         }
+
+        // Measure the owned PerMonitorV2 window on the target display, never the invoking app.
+        var actualScale = Desktop.OwnedWindowScale(hwnd);
+        if (MonitorPlacement.Place(area, widthDip, heightDip, actualScale, atCorner) is not { } exact ||
+            !MoveIfNeeded(hwnd, exact))
+        {
+            return false;
+        }
+
+        var candidate = new SurfacePlacement(monitor, area, exact, UsesWorkArea: true, OwnedScale: actualScale);
+        return Confirm(hwnd, candidate, out placement);
+    }
+
+    internal static bool TryPlaceBreak(Window window, nint source, out SurfacePlacement placement)
+    {
+        placement = default;
+        if (DisplayFor(source, workArea: false) is not { } display)
+        {
+            return false;
+        }
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var candidate = new SurfacePlacement(display.Monitor, display.Area, display.Area, UsesWorkArea: false);
+        return MoveIfNeeded(hwnd, candidate.Bounds) && Confirm(hwnd, candidate, out placement);
+    }
+
+    internal static bool IsCurrent(Window window, SurfacePlacement placement) =>
+        IsCurrent(WinRT.Interop.WindowNative.GetWindowHandle(window), placement);
+
+    internal static bool TryPlaceOrRecover(Window window, nint source, int widthDip, int heightDip, bool previouslyPlaced)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        if (window.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            if (presenter.State == OverlappedPresenterState.Minimized)
+            {
+                presenter.Restore(activateWindow: false);
+            }
+            if (presenter.State == OverlappedPresenterState.Maximized)
+            {
+                if (Desktop.MonitorArea(Desktop.MonitorForWindow(hwnd), workArea: false) is not null)
+                {
+                    return true;
+                }
+                presenter.Restore(activateWindow: false);
+            }
+        }
+
+        if (!previouslyPlaced || Desktop.WindowBounds(hwnd) is not { } existing)
+        {
+            return TryPlace(window, source, widthDip, heightDip, out _);
+        }
+
+        var monitor = Desktop.MonitorForWindow(hwnd);
+        var existingArea = Desktop.MonitorArea(monitor, workArea: true);
+        if (existingArea?.Contains(existing) == true || HasReachableCaption(hwnd, existing))
+        {
+            return true;
+        }
+        var destination = existingArea is { } area ? (Monitor: monitor, Area: area) : DisplayFor(source, workArea: true);
+        if (destination is not { } display || MonitorPlacement.Recover(display.Area, existing, center: existingArea is null) is not { } recovered)
+        {
+            return false;
+        }
+
+        if (!MoveIfNeeded(hwnd, recovered))
+        {
+            return false;
+        }
+        if (Desktop.WindowBounds(hwnd) != recovered && !Desktop.MoveWithoutActivation(hwnd, recovered))
+        {
+            return false;
+        }
+        return Desktop.MonitorArea(display.Monitor, workArea: true) == display.Area &&
+            Desktop.WindowBounds(hwnd) is { } actual && display.Area.Contains(actual);
+    }
+
+    private static bool HasReachableCaption(nint hwnd, PixelRect bounds)
+    {
+        var scale = Desktop.OwnedWindowScale(hwnd);
+        if (MonitorPlacement.Caption(bounds, scale) is not { } caption)
+        {
+            return false;
+        }
+        return Desktop.MonitorArea(Desktop.MonitorForRect(caption), workArea: true) is { } workArea &&
+            MonitorPlacement.HasReachableCaption(bounds, workArea, scale);
+    }
+
+    private static (nint Monitor, PixelRect Area)? DisplayFor(nint source, bool workArea)
+    {
+        var preferred = Desktop.MonitorForWindow(source);
+        if (Desktop.MonitorArea(preferred, workArea) is { } area)
+        {
+            return (preferred, area);
+        }
+
+        var primary = Desktop.PrimaryMonitor();
+        return Desktop.MonitorArea(primary, workArea) is { } fallback ? (primary, fallback) : null;
+    }
+
+    private static bool MoveIfNeeded(nint hwnd, PixelRect rect) => Desktop.WindowBounds(hwnd) == rect || Desktop.MoveWithoutActivation(hwnd, rect);
+
+    private static bool IsCurrent(nint hwnd, SurfacePlacement placement) => placement.Monitor != 0 &&
+        Desktop.MonitorArea(placement.Monitor, placement.UsesWorkArea) == placement.Area &&
+        Desktop.MonitorForWindow(hwnd) == placement.Monitor && Desktop.WindowBounds(hwnd) == placement.Bounds &&
+        (!placement.UsesWorkArea || Desktop.OwnedWindowScale(hwnd) == placement.OwnedScale);
+
+    private static bool Confirm(nint hwnd, SurfacePlacement candidate, out SurfacePlacement placement)
+    {
+        if (IsCurrent(hwnd, candidate))
+        {
+            placement = candidate;
+            return true;
+        }
+
+        placement = default;
+        return false;
     }
 
     internal static void ShowCapture(Window window)

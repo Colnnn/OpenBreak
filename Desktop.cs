@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 
 namespace Afterbreak;
 
@@ -19,8 +21,6 @@ internal enum TrayCommand
     CaptureSettings,
     Appearance,
 }
-
-internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
 
 internal sealed class Desktop : IDisposable
 {
@@ -45,6 +45,8 @@ internal sealed class Desktop : IDisposable
     private readonly nint window;
     private readonly nint foregroundHook;
     private readonly bool sessionNotifications;
+    private readonly DispatcherQueue dispatcher;
+    private readonly DisplayAreaWatcher? displayWatcher;
     private readonly uint process = (uint)Environment.ProcessId;
     private nint lastWorkWindow;
     private nint lastOwnWorkWindow;
@@ -52,9 +54,11 @@ internal sealed class Desktop : IDisposable
     private bool locked;
     private bool disconnected;
     private bool suspended;
+    private bool disposed;
 
-    internal Desktop()
+    internal Desktop(DispatcherQueue dispatcher)
     {
+        this.dispatcher = dispatcher;
         procedure = HandleMessage;
         foregroundProcedure = RecordForeground;
         module = GetModuleHandle(null);
@@ -89,6 +93,7 @@ internal sealed class Desktop : IDisposable
             (id, shortcut) => RegisterHotKey(window, id, shortcut.Modifiers | NoRepeat, shortcut.Key),
             id => UnregisterHotKey(window, id) || Marshal.GetLastPInvokeError() == 1419); // ERROR_HOTKEY_NOT_REGISTERED
         AddIcon();
+        displayWatcher = StartDisplayWatcher();
     }
 
     internal CaptureBinding CaptureBinding { get; }
@@ -149,9 +154,22 @@ internal sealed class Desktop : IDisposable
         return IsWindow(lastWorkWindow) ? lastWorkWindow : 0;
     }
 
-    internal static DesktopArea? MonitorArea(nint source, bool workArea)
+    internal static nint MonitorForWindow(nint source) => source != 0 && IsWindow(source) ? MonitorFromWindow(source, 0) : 0;
+
+    internal static nint MonitorForRect(PixelRect rect)
     {
-        var monitor = MonitorFromWindow(source, 2);
+        if (!rect.IsValid)
+        {
+            return 0;
+        }
+        var bounds = new Rect { Left = rect.X, Top = rect.Y, Right = rect.X + rect.Width, Bottom = rect.Y + rect.Height };
+        return MonitorFromRect(ref bounds, 0);
+    }
+
+    internal static nint PrimaryMonitor() => MonitorFromPoint(default, 1);
+
+    internal static PixelRect? MonitorArea(nint monitor, bool workArea)
+    {
         var information = new MonitorInformation { Size = Marshal.SizeOf<MonitorInformation>() };
         if (monitor == 0 || !GetMonitorInfo(monitor, ref information))
         {
@@ -159,8 +177,21 @@ internal sealed class Desktop : IDisposable
         }
 
         var area = workArea ? information.Work : information.Bounds;
-        var scale = GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 ? dpi / 96.0 : 1;
-        return new DesktopArea(area.Left, area.Top, area.Right, area.Bottom, scale);
+        return PixelRect.FromEdges(area.Left, area.Top, area.Right, area.Bottom);
+    }
+
+    internal static double MonitorScale(nint monitor) => GetScaleFactorForMonitor(monitor, out var scale) == 0 && scale > 0
+        ? scale / 100.0 : 1;
+
+    internal static double OwnedWindowScale(nint hwnd) => GetDpiForWindow(hwnd) / 96.0;
+
+    internal static PixelRect? WindowBounds(nint hwnd) => GetWindowRect(hwnd, out var rect)
+        ? PixelRect.FromEdges(rect.Left, rect.Top, rect.Right, rect.Bottom) : null;
+
+    internal static bool MoveWithoutActivation(nint hwnd, PixelRect rect)
+    {
+        const uint keepZOrderAndFocus = 0x0004 | 0x0010 | 0x0200; // NOZORDER | NOACTIVATE | NOOWNERZORDER
+        return rect.IsValid && SetWindowPos(hwnd, 0, rect.X, rect.Y, rect.Width, rect.Height, keepZOrderAndFocus);
     }
 
     internal static void AvoidActivation(nint window)
@@ -174,7 +205,7 @@ internal sealed class Desktop : IDisposable
 
     internal static void ReturnTo(nint source)
     {
-        if (source != 0 && IsWindow(source) && !IsIconic(source) && GetForegroundWindow() != source)
+        if (source != 0 && IsWindow(source) && IsWindowVisible(source) && !IsIconic(source) && GetForegroundWindow() != source)
         {
             _ = SetForegroundWindow(source);
         }
@@ -182,6 +213,15 @@ internal sealed class Desktop : IDisposable
 
     public void Dispose()
     {
+        disposed = true;
+        if (displayWatcher is not null)
+        {
+            RemoveDisplayHandlers(displayWatcher);
+            if (displayWatcher.Status is DisplayAreaWatcherStatus.Started or DisplayAreaWatcherStatus.EnumerationCompleted)
+            {
+                displayWatcher.Stop();
+            }
+        }
         if (foregroundHook != 0)
         {
             UnhookWinEvent(foregroundHook);
@@ -200,6 +240,46 @@ internal sealed class Desktop : IDisposable
         DestroyWindow(window);
         UnregisterClass(WindowClass, module);
     }
+
+    private DisplayAreaWatcher? StartDisplayWatcher()
+    {
+        DisplayAreaWatcher? watcher = null;
+        try
+        {
+            watcher = DisplayArea.CreateWatcher();
+            watcher.Added += OnDisplayAreaChanged;
+            watcher.Removed += OnDisplayAreaChanged;
+            watcher.Updated += OnDisplayAreaChanged;
+            watcher.Start();
+            return watcher;
+        }
+        catch (COMException)
+        {
+            if (watcher is not null)
+            {
+                RemoveDisplayHandlers(watcher);
+            }
+            // WM_DISPLAYCHANGE and retained placement validation are still available.
+            return null;
+        }
+    }
+
+    private void RemoveDisplayHandlers(DisplayAreaWatcher watcher)
+    {
+        watcher.Added -= OnDisplayAreaChanged;
+        watcher.Removed -= OnDisplayAreaChanged;
+        watcher.Updated -= OnDisplayAreaChanged;
+    }
+
+    private void OnDisplayAreaChanged(DisplayAreaWatcher watcher, DisplayArea area) => QueueDisplayChange();
+
+    private void QueueDisplayChange() => dispatcher.TryEnqueue(() =>
+    {
+        if (!disposed)
+        {
+            DisplaysChanged?.Invoke();
+        }
+    });
 
     private bool IsWorkWindow(nint candidate)
     {
@@ -359,7 +439,7 @@ internal sealed class Desktop : IDisposable
         }
         if (message == DisplayChange)
         {
-            DisplaysChanged?.Invoke();
+            QueueDisplayChange();
         }
         if (message == HotkeyMessage)
         {
@@ -508,10 +588,20 @@ internal sealed class Desktop : IDisposable
     private static extern bool UnhookWinEvent(nint hook);
     [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint window, uint flags);
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromRect(ref Rect rect, uint flags);
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(Point point, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(nint monitor, ref MonitorInformation information);
     [DllImport("shcore.dll")]
-    private static extern int GetDpiForMonitor(nint monitor, int kind, out uint dpiX, out uint dpiY);
+    private static extern int GetScaleFactorForMonitor(nint monitor, out int scale);
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(nint hwnd, out Rect rect);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]

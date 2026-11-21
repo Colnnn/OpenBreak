@@ -115,11 +115,11 @@ internal sealed class SettingsWindow : Window
         }
 
         SetStatus(description);
-        if (!placed)
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 530, 720, placed))
         {
-            SurfaceWindow.Place(this, source, 530, 720);
-            placed = true;
+            return;
         }
+        placed = true;
         Activate();
         if (!AppWindow.IsVisible)
         {

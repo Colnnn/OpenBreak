@@ -81,11 +81,11 @@ internal sealed class AppearanceSettingsWindow : Window
         {
             SetPreferences(preferences, loadFailed);
         }
-        if (!placed)
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 460, 450, placed))
         {
-            SurfaceWindow.Place(this, source, 460, 450);
-            placed = true;
+            return;
         }
+        placed = true;
         Activate();
         if (!AppWindow.IsVisible)
         {

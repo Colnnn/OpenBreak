@@ -37,7 +37,7 @@ internal sealed partial class AfterbreakSession
         timer.Interval = TimeSpan.FromMilliseconds(100);
         timer.Tick += Tick;
 
-        desktop = new Desktop();
+        desktop = new Desktop(dispatcher);
         desktop.Command += Execute;
         captureOptions = new CaptureOptions(this.tasks, desktop.CaptureBinding);
         captureOptions.Load();
@@ -133,20 +133,30 @@ internal sealed partial class AfterbreakSession
             case TrayCommand.Capture:
                 if (visible == Surface.Capture)
                 {
+                    var previousSource = returnWindow;
+                    var previousCardFocus = captureCardFocus;
                     if (source != 0 && source != returnWindow)
                     {
                         SetCaptureSource(source);
                     }
-                    capture.BringBack(returnWindow);
+                    if (!capture.BringBack(returnWindow))
+                    {
+                        returnWindow = previousSource;
+                        captureCardFocus = previousCardFocus;
+                    }
                     return;
                 }
 
                 StopScheduledSurfaceForInput();
                 Dismiss();
                 SetCaptureSource(source);
+                if (!capture.TryShow(source))
+                {
+                    Dismiss();
+                    return;
+                }
                 visible = Surface.Capture;
                 desktop.PreviewAvailable = false;
-                capture.Show(source);
                 break;
             case TrayCommand.Preview:
             case TrayCommand.PreviewSampleBoard:
@@ -157,11 +167,14 @@ internal sealed partial class AfterbreakSession
 
                 Dismiss();
                 previewLayout = command == TrayCommand.Preview ? BreakLayout.Compact : BreakLayout.SampleBoard;
+                if (!warning.TryShow(source))
+                {
+                    return;
+                }
                 returnWindow = source;
                 visible = Surface.Warning;
                 desktop.PreviewAvailable = false;
                 desktop.DismissLabel = "Cancel preview";
-                warning.Show(returnWindow);
                 StartClock();
                 break;
             case TrayCommand.EndBreak:
@@ -264,6 +277,10 @@ internal sealed partial class AfterbreakSession
         {
             return;
         }
+        if (EndIfPlacementInvalid())
+        {
+            return;
+        }
         if (!ManualPreviewAllowed(checkPresentation: visible != Surface.Preview || !preview.HasForeground))
         {
             Dismiss();
@@ -294,15 +311,20 @@ internal sealed partial class AfterbreakSession
         {
             warning.AppWindow.Hide();
             var task = previewLayout == BreakLayout.Compact && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
-            if (!ManualPreviewAllowed(checkPresentation: true))
+            if (!ManualPreviewAllowed(checkPresentation: true) || !warning.PlacementIsCurrent)
             {
                 Dismiss();
                 return;
             }
-            returnWindow = desktop.WorkWindow();
+            var source = desktop.WorkWindow();
+            if (!preview.TryShow(source, previewLayout, task?.Title, task?.NextStep))
+            {
+                Dismiss();
+                return;
+            }
+            returnWindow = source;
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
-            preview.Show(returnWindow, previewLayout, task?.Title, task?.NextStep);
             StartClock();
         }
         else if (visible == Surface.Preview)

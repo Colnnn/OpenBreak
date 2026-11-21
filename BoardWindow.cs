@@ -164,11 +164,11 @@ internal sealed class BoardWindow : Window
 
     internal void Show(nint source)
     {
-        if (!placed)
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 1020, 660, placed))
         {
-            SurfaceWindow.Place(this, source, 1020, 660);
-            placed = true;
+            return;
         }
+        placed = true;
 
         Refresh();
         Activate();

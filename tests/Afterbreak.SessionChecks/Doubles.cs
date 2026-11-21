@@ -39,7 +39,7 @@ namespace Afterbreak
 
     internal sealed class Desktop
     {
-        public Desktop() => Current = this;
+        public Desktop(Microsoft.UI.Dispatching.DispatcherQueue dispatcher) => Current = this;
 
         public static Desktop Current { get; private set; } = null!;
         public bool Disposed { get; private set; }
@@ -111,15 +111,21 @@ namespace Afterbreak
         public Action Cancel { get; }
         public int Shows { get; private set; }
         public string Input { get; set; } = "";
+        public bool CanPlace { get; set; } = true;
 
-        public void Show(nint source)
+        public bool TryShow(nint source)
         {
+            if (!CanPlace)
+            {
+                return false;
+            }
             Shows++;
             Input = "";
             IsVisible = true;
+            return true;
         }
 
-        public void BringBack(nint source) { }
+        public bool BringBack(nint source) => CanPlace;
     }
 
     internal sealed class WarningWindow : TestSurface
@@ -130,13 +136,23 @@ namespace Afterbreak
         public static int Shows { get; private set; }
         public static int Seconds { get; private set; }
         public static string? Kind { get; private set; }
+        public bool CanPlace { get; set; } = true;
+        public bool PlacementIsCurrent { get; set; } = true;
+        public int Attempts { get; private set; }
 
-        public void Show(nint source, string? breakKind = null)
+        public bool TryShow(nint source, string? breakKind = null)
         {
+            Attempts++;
+            if (!CanPlace)
+            {
+                return false;
+            }
             Shows++;
             Seconds = 10;
             Kind = breakKind;
             IsVisible = true;
+            PlacementIsCurrent = true;
+            return true;
         }
 
         public void Update(int seconds) => Seconds = seconds;
@@ -154,16 +170,27 @@ namespace Afterbreak
         public bool IsLong { get; private set; }
         public int Seconds { get; private set; }
         public bool HasForeground => IsVisible;
+        public bool CanPlace { get; set; } = true;
+        public bool RetainedDisplayAvailable { get; set; } = true;
+        public bool PlacementIsCurrent => IsVisible && RetainedDisplayAvailable;
+        public int Attempts { get; private set; }
         public void StopSceneEntrance() { }
 
-        public void Show(nint source, BreakLayout layout, string? task, string? note = null, bool longBreak = false)
+        public bool TryShow(nint source, BreakLayout layout, string? task, string? note = null, bool longBreak = false)
         {
+            Attempts++;
+            if (!CanPlace)
+            {
+                return false;
+            }
             Shows++;
             Text = task;
             Note = note;
             Layout = layout;
             IsLong = longBreak;
             IsVisible = true;
+            RetainedDisplayAvailable = true;
+            return true;
         }
 
         public void Update(int seconds) => Seconds = seconds;

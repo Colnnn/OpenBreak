@@ -17,6 +17,7 @@ internal static class Program
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
             CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
             CheckAppearanceSettings(Path.Combine(temporary.FullName, "appearance.db"));
+            PlacementLifecycleChecks.Run(temporary.FullName);
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
         finally

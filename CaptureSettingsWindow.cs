@@ -86,11 +86,11 @@ internal sealed class CaptureSettingsWindow : Window
             SetPreferences(preferences, description);
         }
 
-        if (!placed)
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 510, 620, placed))
         {
-            SurfaceWindow.Place(this, source, 510, 620);
-            placed = true;
+            return;
         }
+        placed = true;
         Activate();
         if (!AppWindow.IsVisible)
         {

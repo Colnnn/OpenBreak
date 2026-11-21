@@ -30,13 +30,7 @@ internal sealed partial class AfterbreakSession
         reminderTimer.Interval = TimeSpan.FromMilliseconds(250);
         reminderTimer.Tick += (_, _) => UpdateScheduledReminders();
         desktop.EligibilityChanged += () => UpdateScheduledReminders(recheckPresentation: true);
-        desktop.DisplaysChanged += () =>
-        {
-            if (visible is Surface.Warning or Surface.Preview)
-            {
-                EndVisibleBreak();
-            }
-        };
+        desktop.DisplaysChanged += () => EndIfPlacementInvalid();
         lastCheckpoint = reminderClock.GetTimestamp();
         TryLoadReminderSettings();
     }
@@ -85,6 +79,11 @@ internal sealed partial class AfterbreakSession
 
     private void UpdateScheduledReminders(bool recheckPresentation = false)
     {
+        if (EndIfPlacementInvalid())
+        {
+            return;
+        }
+
         // The shell treats our own full-screen break as busy on some displays. Check again on
         // explicit system notifications or after the break loses foreground, and before every show.
         var checkPresentation = recheckPresentation || visible != Surface.Preview || !preview.HasForeground;
@@ -99,6 +98,7 @@ internal sealed partial class AfterbreakSession
         {
             var phase = reminders.Phase;
             var pauses = reminders.PausedBy;
+            var wasShowingWarning = scheduledSurface && visible == Surface.Warning;
             var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
             reminders.Update(environment);
             if (scheduledSurface && (reminders.PausedBy != ReminderPause.None || phase != reminders.Phase))
@@ -110,13 +110,13 @@ internal sealed partial class AfterbreakSession
             {
                 PersistCheckpoint();
             }
-            SynchronizeScheduledSurface();
+            SynchronizeScheduledSurface(wasShowingWarning);
         }
 
         UpdateReminderStatus(systemPause);
     }
 
-    private void SynchronizeScheduledSurface()
+    private void SynchronizeScheduledSurface(bool wasShowingWarning)
     {
         var phase = reminders.Phase;
         if (reminderStorageError || reminders.PausedBy != ReminderPause.None || phase is ReminderPhase.Work or ReminderPhase.Snoozed)
@@ -138,6 +138,12 @@ internal sealed partial class AfterbreakSession
 
             var task = intended == Surface.Preview && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
             var systemPause = desktop.GetSystemPause(checkPresentation: true);
+            // The original warning's display can disappear during checkpoint I/O or task lookup.
+            if (intended == Surface.Preview && wasShowingWarning && !warning.PlacementIsCurrent)
+            {
+                SkipForDisplayLoss();
+                return;
+            }
             var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
             reminders.StartVisibleCountdown();
             // Working hours may have ended during persistence or task lookup.
@@ -148,17 +154,21 @@ internal sealed partial class AfterbreakSession
                 return;
             }
 
-            returnWindow = desktop.WorkWindow();
+            var source = desktop.WorkWindow();
+            var shown = intended == Surface.Warning
+                ? warning.TryShow(source, reminders.IsLongBreak ? "Long break" : "Short break")
+                : preview.TryShow(source, BreakLayout.Compact, task?.Title, task?.NextStep, reminders.IsLongBreak);
+            if (!shown)
+            {
+                SkipForDisplayLoss();
+                return;
+            }
+            returnWindow = source;
             visible = intended;
             scheduledSurface = true;
-            if (intended == Surface.Warning)
-            {
-                warning.Show(returnWindow, reminders.IsLongBreak ? "Long break" : "Short break");
-            }
-            else
+            if (intended == Surface.Preview)
             {
                 desktop.DismissLabel = "End break";
-                preview.Show(returnWindow, BreakLayout.Compact, task?.Title, task?.NextStep, reminders.IsLongBreak);
             }
             reminders.StartVisibleCountdown();
         }
@@ -172,6 +182,29 @@ internal sealed partial class AfterbreakSession
         {
             preview.Update(seconds);
         }
+    }
+
+    private void SkipForDisplayLoss()
+    {
+        reminders.Skip();
+        PersistCheckpoint();
+    }
+
+    private bool EndIfPlacementInvalid()
+    {
+        var valid = visible switch
+        {
+            Surface.Warning => warning.AppWindow.IsVisible && warning.PlacementIsCurrent,
+            Surface.Preview => preview.PlacementIsCurrent,
+            _ => true,
+        };
+        if (valid)
+        {
+            return false;
+        }
+
+        EndVisibleBreak();
+        return true;
     }
 
     private void StopScheduledSurfaceForInput()

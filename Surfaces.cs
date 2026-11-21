@@ -103,18 +103,41 @@ internal sealed class CaptureWindow : Window
         };
     }
 
-    internal void Show(nint source)
+    internal bool TryShow(nint source)
     {
+        if (!TryPosition(source))
+        {
+            return false;
+        }
         input.Text = "";
         hint.Text = "Enter to save · Esc to cancel";
-        BringBack(source);
+        ShowInput();
+        return true;
     }
 
-    internal void BringBack(nint source)
+    internal bool BringBack(nint source)
     {
+        if (!TryPosition(source))
+        {
+            return false;
+        }
+        ShowInput();
+        return true;
+    }
+
+    private bool TryPosition(nint source)
+    {
+        if (!SurfaceWindow.TryPlace(this, source, windowWidth, windowHeight, out _))
+        {
+            return false;
+        }
         sourceWindow = source;
         placed = true;
-        SurfaceWindow.Place(this, sourceWindow, windowWidth, windowHeight);
+        return true;
+    }
+
+    private void ShowInput()
+    {
         SurfaceWindow.ShowCapture(this);
         input.Focus(FocusState.Programmatic);
     }
@@ -133,7 +156,7 @@ internal sealed class CaptureWindow : Window
         windowHeight = height;
         if (placed && AppWindow.IsVisible)
         {
-            SurfaceWindow.Place(this, sourceWindow, windowWidth, windowHeight);
+            SurfaceWindow.TryPlace(this, sourceWindow, windowWidth, windowHeight, out _);
         }
     }
 
@@ -161,8 +184,7 @@ internal sealed class WarningWindow : Window
     private readonly TextBlock detail;
     private readonly StackPanel actions;
     private readonly Border indicator;
-    private nint sourceWindow;
-    private bool placed;
+    private SurfacePlacement placement;
     private int windowWidth = 340;
     private int previewHeight = 94;
     private int scheduledHeight = 138;
@@ -197,17 +219,22 @@ internal sealed class WarningWindow : Window
         SurfaceWindow.Configure(this, noActivate: true);
     }
 
-    internal void Show(nint source, string? breakKind = null)
+    internal bool TryShow(nint source, string? breakKind = null)
     {
         var scheduled = breakKind is not null;
-        sourceWindow = source;
-        placed = true;
+        if (!SurfaceWindow.TryPlace(this, source, windowWidth, scheduled ? scheduledHeight : previewHeight,
+            out placement, atCorner: true))
+        {
+            return false;
+        }
         actions.Visibility = scheduled ? Visibility.Visible : Visibility.Collapsed;
         detail.Text = breakKind ?? "Your 10-second preview is about to begin.";
         Update(10);
-        Position();
         AppWindow.Show(activateWindow: false);
+        return true;
     }
+
+    internal bool PlacementIsCurrent => SurfaceWindow.IsCurrent(this, placement);
 
     internal void ApplyAppearance(AppearanceState state)
     {
@@ -226,14 +253,13 @@ internal sealed class WarningWindow : Window
         windowWidth = width;
         previewHeight = shortHeight;
         scheduledHeight = actionHeight;
-        if (placed && AppWindow.IsVisible)
+        if (placement.Monitor != 0 && AppWindow.IsVisible &&
+            !SurfaceWindow.TryRepositionWarning(this, placement, windowWidth,
+                actions.Visibility == Visibility.Visible ? scheduledHeight : previewHeight, out placement))
         {
-            Position();
+            AppWindow.Hide();
         }
     }
-
-    private void Position() => SurfaceWindow.Place(this, sourceWindow, windowWidth,
-        actions.Visibility == Visibility.Visible ? scheduledHeight : previewHeight, atCorner: true);
 
     internal void Update(int seconds)
     {
@@ -278,6 +304,7 @@ internal sealed class BreakWindow : Window
     private double textScale = 1;
     private bool stackSample;
     private bool animateScene;
+    private SurfacePlacement placement;
 
     internal BreakWindow(Action dismiss)
     {
@@ -398,12 +425,16 @@ internal sealed class BreakWindow : Window
     }
 
     internal bool HasForeground => Desktop.IsForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    internal bool PlacementIsCurrent => AppWindow.IsVisible && SurfaceWindow.IsCurrent(this, placement);
 
-    internal void Show(nint source, BreakLayout layout, string? task, string? nextStep = null, bool longBreak = false)
+    internal bool TryShow(nint source, BreakLayout layout, string? task, string? nextStep = null, bool longBreak = false)
     {
+        if (!SurfaceWindow.TryPlaceBreak(this, source, out placement))
+        {
+            return false;
+        }
         title.Text = longBreak ? "Time for a long break" : "Time for a short break";
         SetPreview(layout, task, nextStep);
-        SurfaceWindow.PlaceBreak(this, source);
         Activate();
         if (!AppWindow.IsVisible)
         {
@@ -411,6 +442,7 @@ internal sealed class BreakWindow : Window
         }
         end.Focus(FocusState.Programmatic);
         StartSceneEntrance();
+        return true;
     }
 
     internal void ApplyAppearance(AppearanceState state)

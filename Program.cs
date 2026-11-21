@@ -1,6 +1,5 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Afterbreak;
 
@@ -25,13 +24,13 @@ internal static class Program
     }
 }
 
-internal sealed class AfterbreakApp : Application
+public sealed partial class AfterbreakApp : Application
 {
     private AfterbreakSession? session;
 
     internal AfterbreakApp()
     {
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
+        InitializeComponent();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

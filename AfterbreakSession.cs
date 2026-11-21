@@ -13,7 +13,9 @@ internal sealed partial class AfterbreakSession
     private readonly DispatcherQueueTimer timer;
     private readonly Action exit;
     private readonly TaskStore tasks;
+    private readonly CaptureOptions captureOptions;
     private BoardWindow? board;
+    private CaptureSettingsWindow? captureSettings;
     private Surface visible;
     private BreakLayout previewLayout;
     private long startedAt;
@@ -33,6 +35,9 @@ internal sealed partial class AfterbreakSession
 
         desktop = new Desktop();
         desktop.Command += Execute;
+        captureOptions = new CaptureOptions(this.tasks, desktop.CaptureBinding);
+        captureOptions.Load();
+        desktop.RefreshShortcutTip();
         InitializeReminders(dispatcher, reminderClock ?? new ReminderClock());
     }
 
@@ -48,12 +53,19 @@ internal sealed partial class AfterbreakSession
     {
         switch (command)
         {
-            case TrayCommand.Settings:
-                StopScheduledSurfaceForInput();
-                if (visible is Surface.Warning or Surface.Preview)
+            case TrayCommand.CaptureSettings:
+                DismissBreakForSettings(preserveSchedule: true);
+                if (captureOptions.LoadFailed && captureSettings?.AppWindow.IsVisible != true)
                 {
-                    Dismiss();
+                    captureOptions.Load();
+                    desktop.RefreshShortcutTip();
                 }
+                captureSettings ??= new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide);
+                desktop.CaptureSettingsHandle = captureSettings.Handle;
+                captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status);
+                break;
+            case TrayCommand.Settings:
+                DismissBreakForSettings();
                 if (reminderLoadError && reminderSettings?.AppWindow.IsVisible != true)
                 {
                     TryLoadReminderSettings();
@@ -132,9 +144,35 @@ internal sealed partial class AfterbreakSession
                 preview.Close();
                 board?.CloseForQuit();
                 reminderSettings?.CloseForQuit();
+                captureSettings?.CloseForQuit();
                 exit();
                 break;
         }
+    }
+
+    private void DismissBreakForSettings(bool preserveSchedule = false)
+    {
+        if (preserveSchedule && scheduledSurface)
+        {
+            reminders.Update(ReminderPause.Interaction);
+            checkpointDirty = true;
+        }
+        else
+        {
+            StopScheduledSurfaceForInput();
+        }
+        if (visible is Surface.Warning or Surface.Preview)
+        {
+            Dismiss();
+        }
+    }
+
+    private string? ApplyCaptureShortcut(CaptureShortcut shortcut)
+    {
+        var failure = captureOptions.Apply(shortcut);
+        desktop.RefreshShortcutTip();
+        captureSettings?.SetStatus(captureOptions.Status);
+        return failure;
     }
 
     private void StartClock()

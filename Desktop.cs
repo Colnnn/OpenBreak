@@ -16,6 +16,7 @@ internal enum TrayCommand
     TogglePause,
     Snooze,
     Skip,
+    CaptureSettings,
 }
 
 internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
@@ -32,7 +33,7 @@ internal sealed class Desktop : IDisposable
     private const uint SessionChange = 0x02B1;
     private const uint SelectNotification = 0x0400;
     private const uint KeyboardSelectNotification = 0x0401;
-    private const uint HotkeyModifiers = 0x4003; // Ctrl, Alt, and no repeat.
+    private const uint NoRepeat = 0x4000;
     private const uint ForegroundEvent = 3;
     private const string WindowClass = "Afterbreak.Tray";
 
@@ -83,14 +84,17 @@ internal sealed class Desktop : IDisposable
         foregroundHook = SetWinEventHook(
             ForegroundEvent, ForegroundEvent, 0, foregroundProcedure, 0, 0, 0x0002);
         sessionNotifications = WTSRegisterSessionNotification(window, 0); // This session only.
-        ShortcutAvailable = RegisterHotKey(window, 1, HotkeyModifiers, 'K');
+        CaptureBinding = new CaptureBinding(
+            (id, shortcut) => RegisterHotKey(window, id, shortcut.Modifiers | NoRepeat, shortcut.Key),
+            id => UnregisterHotKey(window, id) || Marshal.GetLastPInvokeError() == 1419); // ERROR_HOTKEY_NOT_REGISTERED
         AddIcon();
     }
 
-    internal bool ShortcutAvailable { get; }
+    internal CaptureBinding CaptureBinding { get; }
     internal string? DismissLabel { get; set; }
     internal nint BoardHandle { get; set; }
     internal nint SettingsHandle { get; set; }
+    internal nint CaptureSettingsHandle { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
     internal bool MenuOpen { get; private set; }
     internal bool SnoozeAvailable { get; set; }
@@ -180,10 +184,7 @@ internal sealed class Desktop : IDisposable
         {
             UnhookWinEvent(foregroundHook);
         }
-        if (ShortcutAvailable)
-        {
-            UnregisterHotKey(window, 1);
-        }
+        CaptureBinding.Dispose();
         if (sessionNotifications)
         {
             WTSUnRegisterSessionNotification(window);
@@ -217,7 +218,7 @@ internal sealed class Desktop : IDisposable
 
     private void ObserveWorkWindow(nint candidate)
     {
-        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle))
+        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle || candidate == CaptureSettingsHandle))
         {
             lastOwnWorkWindow = candidate;
         }
@@ -242,12 +243,22 @@ internal sealed class Desktop : IDisposable
         }
     }
 
+    internal void RefreshShortcutTip()
+    {
+        if (iconAdded)
+        {
+            var data = IconData();
+            data.Flags = 0x84; // NIF_TIP | NIF_SHOWTIP
+            ShellNotifyIcon(1, ref data);
+        }
+    }
+
     private NotifyIconData IconData() => new()
     {
         Size = (uint)Marshal.SizeOf<NotifyIconData>(),
         Window = window,
         Id = 1,
-        Tip = ShortcutAvailable ? "Afterbreak · Ctrl+Alt+K" : "Afterbreak · Shortcut unavailable",
+        Tip = CaptureBinding.Active is { } active ? $"Afterbreak · {active}" : "Afterbreak · Shortcut unavailable",
         Info = "",
         InfoTitle = "",
     };
@@ -266,7 +277,9 @@ internal sealed class Desktop : IDisposable
         try
         {
             AppendMenu(menu, 0, (nuint)TrayCommand.Tasks, "Open Tasks");
-            AppendMenu(menu, 0, (nuint)TrayCommand.Capture, ShortcutAvailable ? "Capture task\tCtrl+Alt+K" : "Capture task");
+            AppendMenu(menu, 0, (nuint)TrayCommand.Capture,
+                CaptureBinding.Active is { } active ? $"Capture task\t{active}" : "Capture task");
+            AppendMenu(menu, 0, (nuint)TrayCommand.CaptureSettings, "Capture settings");
             var previewFlags = PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None ? 0u : 1u; // MF_GRAYED
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.Preview, "Preview a break");
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
@@ -344,9 +357,13 @@ internal sealed class Desktop : IDisposable
         {
             DisplaysChanged?.Invoke();
         }
-        if (message == HotkeyMessage && wParam == 1)
+        if (message == HotkeyMessage)
         {
-            Command?.Invoke(TrayCommand.Capture, WorkWindow());
+            var keys = unchecked((uint)lParam);
+            if (CaptureBinding.Matches(wParam, keys & 0xffff, keys >> 16, unchecked((uint)GetMessageTime())))
+            {
+                Command?.Invoke(TrayCommand.Capture, WorkWindow());
+            }
             return 0;
         }
         if (message == TrayMessage && ((uint)(nuint)lParam & 0xFFFF) is ContextMenu or SelectNotification or KeyboardSelectNotification)
@@ -432,8 +449,10 @@ internal sealed class Desktop : IDisposable
     private static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll")]
     private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(nint window, int id);
+    [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint LoadIcon(nint instance, nint icon);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]

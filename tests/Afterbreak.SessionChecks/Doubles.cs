@@ -34,7 +34,7 @@ namespace Microsoft.UI.Dispatching
 
 namespace Afterbreak
 {
-    internal enum TrayCommand { Capture, Preview, EndBreak, Quit, PreviewSampleBoard, Tasks, Settings, TogglePause, Snooze, Skip }
+    internal enum TrayCommand { Capture, Preview, EndBreak, Quit, PreviewSampleBoard, Tasks, Settings, TogglePause, Snooze, Skip, CaptureSettings }
     internal enum BreakLayout { Compact, SampleBoard }
 
     internal sealed class Desktop
@@ -46,6 +46,8 @@ namespace Afterbreak
         public string? DismissLabel { get; set; }
         public nint BoardHandle { get; set; }
         public nint SettingsHandle { get; set; }
+        public nint CaptureSettingsHandle { get; set; }
+        public CaptureBinding CaptureBinding { get; } = new((_, _) => true, _ => true);
         public bool PreviewAvailable { get; set; } = true;
         public bool MenuOpen { get; set; }
         public bool SnoozeAvailable { get; set; }
@@ -63,7 +65,12 @@ namespace Afterbreak
         public void Send(TrayCommand command, nint source = 10) => Command?.Invoke(command, source);
         public void ChangeEligibility() => EligibilityChanged?.Invoke();
         public void ChangeDisplays() => DisplaysChanged?.Invoke();
-        public void Dispose() => Disposed = true;
+        public void RefreshShortcutTip() { }
+        public void Dispose()
+        {
+            CaptureBinding.Dispose();
+            Disposed = true;
+        }
     }
 
     internal class TestSurface
@@ -208,6 +215,25 @@ namespace Afterbreak
         public void Show(nint source, ReminderSettings settings, string description, bool storageError)
         {
             LoadedSettings = settings;
+            IsVisible = true;
+        }
+
+        public void SetStatus(string description) { }
+        public void CloseForQuit() => Close();
+    }
+
+    internal sealed class CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide) : TestSurface
+    {
+        public static CaptureSettingsWindow Current { get; private set; } = null!;
+        public nint Handle => 302;
+        public Func<CaptureShortcut, string?> Apply { get; } = apply;
+        public Func<bool> DismissGuide { get; } = dismissGuide;
+        public CapturePreferences? Preferences { get; private set; }
+
+        public void Show(nint source, CapturePreferences preferences, string description)
+        {
+            Current = this;
+            Preferences = preferences;
             IsVisible = true;
         }
 

@@ -15,6 +15,7 @@ internal static class Program
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
+            CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
         finally
@@ -272,5 +273,67 @@ internal static class Program
         tray.Send(TrayCommand.Settings);
         Check(SettingsWindow.Current.LoadedSettings == original, "opening settings retries the failed load");
         tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckCaptureSettings(string path)
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var queue = new DispatcherQueue();
+        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        var tray = Desktop.Current;
+        var timer = queue.Timers[1];
+        var initialWarnings = WarningWindow.Shows;
+
+        void Tick(int seconds)
+        {
+            for (var second = 0; second < seconds; second++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                timer.Fire();
+            }
+        }
+
+        Tick(2);
+        tray.Send(TrayCommand.CaptureSettings);
+        var captureSettings = CaptureSettingsWindow.Current;
+        timer.Fire();
+        var checkpoint = store.LoadReminders();
+        Check(captureSettings.Preferences is { GuideDismissed: false } &&
+            CaptureShortcut.TryParse("Ctrl+Shift+7", out var chord) && captureSettings.Apply(chord) is null &&
+            tray.CaptureBinding.Active == chord && captureSettings.DismissGuide(), "capture settings apply a shortcut and persist guidance dismissal");
+        Check(store.LoadReminders() == checkpoint, "shortcut and guidance writes leave the reminder checkpoint unchanged");
+        tray.Send(TrayCommand.Capture, captureSettings.Handle);
+        Check(CaptureWindow.Current.Save("Capture with settings open") && SurfaceWindow.Returned == captureSettings.Handle && captureSettings.IsVisible,
+            "capture returns to capture settings without replacing its draft");
+        Tick(20);
+        Check(WarningWindow.Shows == initialWarnings, "capture settings defer scheduled display without completing work");
+        captureSettings.Hide();
+        timer.Fire();
+        Tick(3);
+        Check(WarningWindow.Current.IsVisible, "closing capture settings resumes the original work interval");
+        Tick(10);
+        Tick(3);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 7, "a partial scheduled break is underway");
+
+        tray.Send(TrayCommand.CaptureSettings);
+        Tick(20);
+        Check(!BreakWindow.Current.IsVisible && captureSettings.IsVisible &&
+            captureSettings.Preferences is { GuideDismissed: true }, "opening capture settings defers the partial break and retains acknowledged guidance");
+        captureSettings.Hide();
+        timer.Fire();
+        Check(WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10, "resuming the partial break gives a full warning");
+        Tick(10);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 7, "capture settings preserve the original break time remaining");
+        Tick(7);
+        Check(store.LoadReminders().Checkpoint?.CompletedShorts == 1, "the resumed break counts only after completing");
+
+        tray.Send(TrayCommand.Quit);
+        Check(captureSettings.Closed && tray.CaptureBinding.Active is null, "quit closes capture settings and releases the active shortcut");
+        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, new TaskStore(path), clock);
+        Check(Desktop.Current.CaptureBinding.Active?.ToString() == "Ctrl+Shift+7", "startup re-registers the persisted shortcut");
+        Desktop.Current.Send(TrayCommand.Quit);
     }
 }

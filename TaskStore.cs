@@ -16,7 +16,7 @@ internal sealed partial class TaskStore(string path)
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -220,6 +220,7 @@ internal sealed partial class TaskStore(string path)
             ) STRICT;
             CREATE INDEX task_order ON tasks (archived, status, position, id);
             {ReminderTable}
+            {CaptureTable}
             PRAGMA application_id = {ApplicationId};
             PRAGMA user_version = {SchemaVersion};
             """);
@@ -235,11 +236,11 @@ internal sealed partial class TaskStore(string path)
         }
 
         var version = ReadPragma(connection, null, "PRAGMA user_version");
-        if (version == 1)
+        if (version is 1 or 2)
         {
             using var transaction = connection.BeginTransaction();
             version = ReadPragma(connection, transaction, "PRAGMA user_version");
-            if (version == 1)
+            if (version is 1 or 2)
             {
                 if (ReadPragma(connection, transaction, "PRAGMA application_id") != ApplicationId)
                 {
@@ -253,8 +254,15 @@ internal sealed partial class TaskStore(string path)
                 using var tasks = Command(connection, transaction,
                     "SELECT id, title, next_step, status, position, archived FROM tasks LIMIT 0");
                 using (tasks.ExecuteReader()) { }
+                if (version == 2)
+                {
+                    using var reminders = Command(connection, transaction,
+                        "SELECT id, settings, checkpoint FROM reminder_state LIMIT 0");
+                    using (reminders.ExecuteReader()) { }
+                }
                 using var migration = Command(connection, transaction, $"""
-                    {ReminderTable}
+                    {(version == 1 ? ReminderTable : "")}
+                    {CaptureTable}
                     PRAGMA user_version = {SchemaVersion};
                     """);
                 migration.ExecuteNonQuery();

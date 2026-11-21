@@ -21,6 +21,9 @@ internal static class Program
             Console.WriteLine("PASS schema-one migration, physical corruption and failed migration preservation");
             CheckReminderWriteFailure(Path.Combine(temporary.FullName, "reminder-writes.db"));
             Console.WriteLine("PASS reminder settings and checkpoint commit together and roll back together");
+            CheckCaptureMigration(temporary.FullName);
+            Console.WriteLine("PASS capture preferences migration preserves v1/v2 tasks and existing reminder state");
+            CapturePreferenceChecks.Run(temporary.FullName);
         }
         finally
         {
@@ -156,7 +159,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 2L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 3L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -219,6 +222,40 @@ internal static class Program
         ExpectStorageError(() => store.SaveReminders(settings with { Enabled = false }, checkpoint with { CompletedShorts = 0 }));
         Require(new TaskStore(path).LoadReminders() == (settings, checkpoint) && TaskFingerprint(path) == initialTasks,
             "A settings write failure preserves the prior configuration, checkpoint, and tasks.");
+    }
+
+    private static void CheckCaptureMigration(string folder)
+    {
+        var path = Path.Combine(folder, "schema-v2.db");
+        CreateSchemaOne(path);
+        var fingerprint = TaskFingerprint(path);
+        var reminders = ReminderSettings.Default with { Enabled = true, WorkSeconds = 33, TimerOnly = true };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 3, true,
+            TimeSpan.FromSeconds(7), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        new TaskStore(path).SaveReminders(reminders, checkpoint);
+        ExecuteSql(path, "DROP TABLE capture_preferences; PRAGMA user_version = 2;");
+        var savedReminderRow = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
+        var migrated = new TaskStore(path);
+        Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
+            "Existing installations start with the default capture shortcut and optional guide.");
+        Require(Scalar(path, "PRAGMA user_version") is 3L && TaskFingerprint(path) == fingerprint &&
+            Equals(savedReminderRow, Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1")),
+            "Migration leaves the existing task and reminder rows byte-identical.");
+        Require(CaptureShortcut.TryParse("Ctrl+Shift+F5", out var shortcut), "A test shortcut can be parsed.");
+        migrated.SaveCaptureShortcut(shortcut);
+        migrated.DismissCaptureGuide();
+        Require(TaskFingerprint(path) == fingerprint &&
+            Equals(savedReminderRow, Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1")),
+            "Changing either capture preference leaves the existing task and reminder rows byte-identical.");
+
+        var blocked = Path.Combine(folder, "capture-blocked-v1.db");
+        CreateSchemaOne(blocked);
+        ExecuteSql(blocked, "CREATE TABLE capture_preferences (keep TEXT); INSERT INTO capture_preferences VALUES ('original');");
+        var bytes = File.ReadAllBytes(blocked);
+        ExpectStorageError(() => new TaskStore(blocked).LoadCapturePreferences());
+        Require(File.ReadAllBytes(blocked).SequenceEqual(bytes) && Scalar(blocked, "PRAGMA user_version") is 1L &&
+            Scalar(blocked, "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'reminder_state'") is 0L,
+            "A failed v1-to-v3 upgrade rolls back the intermediate reminder DDL.");
     }
 
     private static object? Scalar(string path, string sql)

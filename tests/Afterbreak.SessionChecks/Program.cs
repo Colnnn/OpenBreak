@@ -13,6 +13,8 @@ internal static class Program
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
+            CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
+            CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
         }
         finally
         {
@@ -160,5 +162,114 @@ internal static class Program
             throw new InvalidOperationException(name);
         }
         Console.WriteLine($"PASS {name}");
+    }
+
+    private static void CheckReminderInterlock(string path)
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var queue = new DispatcherQueue();
+        var store = new TaskStore(path);
+        store.Add("Private return task");
+        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        var tray = Desktop.Current;
+        var capture = CaptureWindow.Current;
+        var schedulerTimer = queue.Timers[1];
+        var enabled = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, TimerOnly = true };
+
+        void TickSeconds(int seconds)
+        {
+            for (var second = 0; second < seconds; second++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                schedulerTimer.Fire();
+            }
+        }
+
+        var warnings = WarningWindow.Shows;
+        tray.Send(TrayCommand.Preview);
+        tray.Send(TrayCommand.Settings);
+        Check(WarningWindow.Shows == warnings + 1 && !queue.Timer.Running && SettingsWindow.Current.IsVisible,
+            "opening settings cancels a manual preview before an overlay can appear");
+        var settings = SettingsWindow.Current;
+        using (var blocker = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
+        {
+            blocker.Open();
+            using var locked = blocker.BeginTransaction();
+            Check(!settings.Save(enabled) && !schedulerTimer.Running, "failed opt-in keeps reminders off");
+            locked.Rollback();
+        }
+        Check(settings.Save(enabled) && schedulerTimer.Running, "successful opt-in starts the scheduler");
+        warnings = WarningWindow.Shows;
+        tray.Send(TrayCommand.Capture, settings.Handle);
+        capture.Input = "Settings capture draft";
+        TickSeconds(8);
+        Check(WarningWindow.Shows == warnings && capture.Input == "Settings capture draft" && settings.IsVisible,
+            "capture and settings defer production warnings without losing drafts");
+        Check(capture.Save(capture.Input) && SurfaceWindow.Returned == settings.Handle,
+            "capture returns to a still-open settings window");
+
+        tray.Send(TrayCommand.Tasks);
+        var board = BoardWindow.Current;
+        board.IsEditing = true;
+        settings.Hide();
+        TickSeconds(10);
+        Check(WarningWindow.Shows == warnings && board.IsEditing, "the board editor keeps production reminders deferred");
+        board.IsEditing = false;
+        TickSeconds(4);
+        tray.Send(TrayCommand.PreviewSampleBoard);
+        TickSeconds(40);
+        Check(queue.Timer.Running && WarningWindow.Shows == warnings + 1 && WarningWindow.Kind is null &&
+            store.LoadReminders().Checkpoint?.CompletedShorts == 0, "the sample preview holds the scheduler without advancing cadence");
+        tray.Send(TrayCommand.EndBreak);
+        TickSeconds(3);
+        Check(WarningWindow.Shows == warnings + 2 && WarningWindow.Kind == "Short break" && WarningWindow.Seconds is >= 8 and <= 10,
+            "production resumes with a full scheduled warning after the preview");
+
+        TickSeconds(WarningWindow.Seconds - 1);
+        var breaks = BreakWindow.Shows;
+        var reads = 0;
+        tray.CheckSystemPause = () => ++reads == 1 ? ReminderPause.None : ReminderPause.Presentation;
+        TickSeconds(1);
+        Check(BreakWindow.Shows == breaks, "the second eligibility check can block a due overlay");
+        tray.CheckSystemPause = null;
+        tray.ChangeEligibility();
+        Check(WarningWindow.Seconds == 10, "eligibility recovery starts a new warning");
+        TickSeconds(10);
+        Check(BreakWindow.Shows == breaks + 1 && BreakWindow.Text is null, "scheduled timer-only break omits the saved task");
+        tray.Send(TrayCommand.EndBreak);
+        Check(store.LoadReminders().Checkpoint?.CompletedShorts == 0, "ending a scheduled break early advances no cadence");
+
+        tray.Send(TrayCommand.TogglePause);
+        tray.Send(TrayCommand.Preview);
+        Check(!tray.PreviewAvailable && !queue.Timer.Running && store.LoadReminders().Checkpoint?.ManuallyPaused == true,
+            "presentation pause persists and blocks explicit previews");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckFailedStartupRead(string path)
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var original = ReminderSettings.Default with { Enabled = true, WorkSeconds = 64, TimerOnly = true };
+        var store = new TaskStore(path);
+        store.SaveReminders(original, new ReminderScheduler(clock, original).Checkpoint());
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
+        using (var blocker = new SqliteConnection(connectionString))
+        {
+            blocker.Open();
+            using var command = blocker.CreateCommand();
+            command.CommandText = "BEGIN EXCLUSIVE;";
+            command.ExecuteNonQuery();
+            _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store, clock);
+            command.CommandText = "ROLLBACK;";
+            command.ExecuteNonQuery();
+        }
+
+        var tray = Desktop.Current;
+        tray.Send(TrayCommand.TogglePause);
+        Check(tray.ManuallyPaused && store.LoadReminders().Settings == original,
+            "a transient startup read failure never overwrites saved settings with fallback defaults");
+        tray.Send(TrayCommand.Settings);
+        Check(SettingsWindow.Current.LoadedSettings == original, "opening settings retries the failed load");
+        tray.Send(TrayCommand.Quit);
     }
 }

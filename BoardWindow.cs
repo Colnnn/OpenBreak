@@ -129,6 +129,7 @@ internal sealed class BoardWindow : Window
     }
 
     internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+    internal bool IsEditing => editing;
 
     internal void Show(nint source)
     {

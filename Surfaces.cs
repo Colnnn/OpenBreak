@@ -120,15 +120,25 @@ internal sealed class CaptureWindow : Window
 internal sealed class WarningWindow : Window
 {
     private readonly TextBlock title;
+    private readonly TextBlock detail;
+    private readonly StackPanel actions;
 
-    internal WarningWindow()
+    internal WarningWindow(Action snooze, Action skip)
     {
         Title = "Afterbreak · Preview warning";
         title = SurfaceStyle.Label("", 20, FontWeights.SemiBold);
-        var detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", 13);
+        detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", 13);
+        var snoozeButton = new Button { Content = "Snooze 5 min" };
+        snoozeButton.Click += (_, _) => snooze();
+        var skipButton = new Button { Content = "Skip break" };
+        skipButton.Click += (_, _) => skip();
+        actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        actions.Children.Add(snoozeButton);
+        actions.Children.Add(skipButton);
         var text = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(title);
         text.Children.Add(detail);
+        text.Children.Add(actions);
 
         var block = new Grid { ColumnSpacing = 12, Margin = new Thickness(16, 10, 16, 10) };
         block.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });
@@ -140,10 +150,13 @@ internal sealed class WarningWindow : Window
         SurfaceWindow.Configure(this, noActivate: true);
     }
 
-    internal void Show(nint source)
+    internal void Show(nint source, string? breakKind = null)
     {
+        var scheduled = breakKind is not null;
+        actions.Visibility = scheduled ? Visibility.Visible : Visibility.Collapsed;
+        detail.Text = breakKind ?? "Your 10-second preview is about to begin.";
         Update(10);
-        SurfaceWindow.Place(this, source, 340, 94, atCorner: true);
+        SurfaceWindow.Place(this, source, 340, scheduled ? 138 : 94, atCorner: true);
         AppWindow.Show(activateWindow: false);
     }
 
@@ -166,6 +179,7 @@ internal enum BreakLayout
 internal sealed class BreakWindow : Window
 {
     private readonly TextBlock clock;
+    private readonly TextBlock title;
     private readonly TextBlock taskTitle;
     private readonly TextBlock taskNote;
     private readonly ScrollViewer compactTask;
@@ -184,7 +198,7 @@ internal sealed class BreakWindow : Window
         clock.HorizontalAlignment = HorizontalAlignment.Center;
         clock.Foreground = foreground;
         AutomationProperties.SetName(clock, "Time remaining");
-        var title = SurfaceStyle.Label("Time for a short break", 17);
+        title = SurfaceStyle.Label("Time for a short break", 17);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         title.Foreground = foreground;
 
@@ -292,8 +306,11 @@ internal sealed class BreakWindow : Window
         body.MinWidth = showBoard ? 0 : 250;
     }
 
-    internal void Show(nint source, BreakLayout layout, string? task, string? nextStep = null)
+    internal bool HasForeground => Desktop.IsForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+
+    internal void Show(nint source, BreakLayout layout, string? task, string? nextStep = null, bool longBreak = false)
     {
+        title.Text = longBreak ? "Time for a long break" : "Time for a short break";
         SetPreview(layout, task, nextStep);
         SurfaceWindow.PlaceBreak(this, source);
         Activate();
@@ -306,7 +323,7 @@ internal sealed class BreakWindow : Window
 
     internal void Update(int seconds)
     {
-        var value = $"0:{seconds:00}";
+        var value = $"{seconds / 60}:{seconds % 60:00}";
         if (clock.Text != value)
         {
             clock.Text = value;

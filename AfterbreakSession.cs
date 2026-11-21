@@ -3,7 +3,7 @@ using Microsoft.UI.Dispatching;
 
 namespace Afterbreak;
 
-internal sealed class AfterbreakSession
+internal sealed partial class AfterbreakSession
 {
     private static readonly TimeSpan PreviewLength = TimeSpan.FromSeconds(10);
     private readonly Desktop desktop;
@@ -20,19 +20,20 @@ internal sealed class AfterbreakSession
     private nint returnWindow;
     private BoardWindow.CardFocus? captureCardFocus;
 
-    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null)
+    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null, TimeProvider? reminderClock = null)
     {
         this.exit = exit;
         this.tasks = tasks ?? TaskStore.ForCurrentUser();
         capture = new CaptureWindow(SaveTask, Dismiss);
-        warning = new WarningWindow();
-        preview = new BreakWindow(Dismiss);
+        warning = new WarningWindow(SnoozeReminder, SkipReminder);
+        preview = new BreakWindow(EndVisibleBreak);
         timer = dispatcher.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(100);
         timer.Tick += Tick;
 
         desktop = new Desktop();
         desktop.Command += Execute;
+        InitializeReminders(dispatcher, reminderClock ?? new ReminderClock());
     }
 
     private enum Surface
@@ -47,7 +48,31 @@ internal sealed class AfterbreakSession
     {
         switch (command)
         {
+            case TrayCommand.Settings:
+                StopScheduledSurfaceForInput();
+                if (visible is Surface.Warning or Surface.Preview)
+                {
+                    Dismiss();
+                }
+                if (reminderLoadError && reminderSettings?.AppWindow.IsVisible != true)
+                {
+                    TryLoadReminderSettings();
+                }
+                reminderSettings ??= new SettingsWindow(SaveSettings);
+                desktop.SettingsHandle = reminderSettings.Handle;
+                reminderSettings.Show(source, reminders.Settings, desktop.ReminderStatus, reminderStorageError);
+                break;
+            case TrayCommand.TogglePause:
+                TogglePresentationPause();
+                break;
+            case TrayCommand.Snooze:
+                SnoozeReminder();
+                break;
+            case TrayCommand.Skip:
+                SkipReminder();
+                break;
             case TrayCommand.Tasks:
+                StopScheduledSurfaceForInput();
                 if (visible is Surface.Warning or Surface.Preview)
                 {
                     Dismiss();
@@ -68,6 +93,7 @@ internal sealed class AfterbreakSession
                     return;
                 }
 
+                StopScheduledSurfaceForInput();
                 Dismiss();
                 SetCaptureSource(source);
                 visible = Surface.Capture;
@@ -76,7 +102,7 @@ internal sealed class AfterbreakSession
                 break;
             case TrayCommand.Preview:
             case TrayCommand.PreviewSampleBoard:
-                if (visible != Surface.None)
+                if (visible != Surface.None || !ManualPreviewAllowed(checkPresentation: true))
                 {
                     return;
                 }
@@ -91,18 +117,21 @@ internal sealed class AfterbreakSession
                 StartClock();
                 break;
             case TrayCommand.EndBreak:
-                if (visible is Surface.Warning or Surface.Preview)
-                {
-                    Dismiss();
-                }
+                EndVisibleBreak();
                 break;
             case TrayCommand.Quit:
+                reminderTimer.Stop();
+                if (reminders.Settings.Enabled && !reminderStorageError)
+                {
+                    PersistCheckpoint();
+                }
                 Dismiss();
                 desktop.Dispose();
                 capture.Close();
                 warning.Close();
                 preview.Close();
                 board?.CloseForQuit();
+                reminderSettings?.CloseForQuit();
                 exit();
                 break;
         }
@@ -122,6 +151,20 @@ internal sealed class AfterbreakSession
 
     private void Tick(DispatcherQueueTimer sender, object args)
     {
+        if (scheduledSurface || visible is not (Surface.Warning or Surface.Preview))
+        {
+            return;
+        }
+        if (!ManualPreviewAllowed(checkPresentation: visible != Surface.Preview || !preview.HasForeground))
+        {
+            Dismiss();
+            return;
+        }
+        if (desktop.MenuOpen)
+        {
+            return;
+        }
+
         var remaining = PreviewLength - Stopwatch.GetElapsedTime(startedAt);
         if (remaining > TimeSpan.Zero)
         {
@@ -141,7 +184,12 @@ internal sealed class AfterbreakSession
         if (visible == Surface.Warning)
         {
             warning.AppWindow.Hide();
-            var task = previewLayout == BreakLayout.Compact ? GetReturnTask() : null;
+            var task = previewLayout == BreakLayout.Compact && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
+            if (!ManualPreviewAllowed(checkPresentation: true))
+            {
+                Dismiss();
+                return;
+            }
             returnWindow = desktop.WorkWindow();
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
@@ -189,6 +237,7 @@ internal sealed class AfterbreakSession
     private void Dismiss()
     {
         var closing = visible;
+        scheduledSurface = false;
         visible = Surface.None;
         timer.Stop();
         desktop.DismissLabel = null;

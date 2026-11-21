@@ -1,0 +1,320 @@
+using Microsoft.UI.Dispatching;
+
+namespace Afterbreak;
+
+internal sealed partial class AfterbreakSession
+{
+    private sealed class ReminderClock : TimeProvider
+    {
+        // On .NET 8 for Windows this monotonic counter includes time spent asleep.
+        public override long TimestampFrequency => 1000;
+        public override long GetTimestamp() => Environment.TickCount64;
+    }
+
+    private static readonly TimeSpan CheckpointInterval = TimeSpan.FromSeconds(30);
+    private DispatcherQueueTimer reminderTimer = null!;
+    private ReminderScheduler reminders = null!;
+    private TimeProvider reminderClock = null!;
+    private SettingsWindow? reminderSettings;
+    private bool reminderStorageError;
+    private bool reminderLoadError;
+    private bool scheduledSurface;
+    private bool checkpointDirty;
+    private long lastCheckpoint;
+
+    private void InitializeReminders(DispatcherQueue dispatcher, TimeProvider clock)
+    {
+        reminderClock = clock;
+        reminders = new ReminderScheduler(clock, ReminderSettings.Default);
+        reminderTimer = dispatcher.CreateTimer();
+        reminderTimer.Interval = TimeSpan.FromMilliseconds(250);
+        reminderTimer.Tick += (_, _) => UpdateScheduledReminders();
+        desktop.EligibilityChanged += () => UpdateScheduledReminders(recheckPresentation: true);
+        desktop.DisplaysChanged += () =>
+        {
+            if (visible is Surface.Warning or Surface.Preview)
+            {
+                EndVisibleBreak();
+            }
+        };
+        lastCheckpoint = Environment.TickCount64;
+        TryLoadReminderSettings();
+    }
+
+    private void TryLoadReminderSettings()
+    {
+        try
+        {
+            var (settings, checkpoint) = tasks.LoadReminders();
+            var alreadyPaused = reminders.ManuallyPaused;
+            reminders = new ReminderScheduler(reminderClock, settings, checkpoint);
+            if (alreadyPaused)
+            {
+                reminders.SetManualPause(true);
+            }
+            reminderStorageError = reminderLoadError = false;
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            reminderStorageError = reminderLoadError = true;
+        }
+
+        UpdateScheduledReminders();
+        UpdateReminderTimer();
+    }
+
+    private bool ManualPreviewAllowed(bool checkPresentation) => !reminderLoadError && !reminders.ManuallyPaused &&
+        desktop.GetSystemPause(checkPresentation) == ReminderPause.None;
+
+    private void UpdateReminderTimer()
+    {
+        if (reminders.Settings.Enabled && !reminderStorageError)
+        {
+            reminderTimer.Start();
+        }
+        else
+        {
+            reminderTimer.Stop();
+        }
+    }
+
+    private bool IsEditingOrPreviewing() => visible == Surface.Capture ||
+        (!scheduledSurface && visible is (Surface.Warning or Surface.Preview)) ||
+        (desktop.MenuOpen && visible != Surface.Preview) || reminderSettings?.AppWindow.IsVisible == true || board?.IsEditing == true;
+
+    private void UpdateScheduledReminders(bool recheckPresentation = false)
+    {
+        // The shell treats our own full-screen break as busy on some displays. Check again on
+        // explicit system notifications or after the break loses foreground, and before every show.
+        var checkPresentation = recheckPresentation || visible != Surface.Preview || !preview.HasForeground;
+        var systemPause = desktop.GetSystemPause(checkPresentation);
+        if (!scheduledSurface && visible is (Surface.Warning or Surface.Preview) &&
+            (systemPause != ReminderPause.None || reminders.ManuallyPaused))
+        {
+            Dismiss();
+        }
+
+        if (reminders.Settings.Enabled && !reminderStorageError)
+        {
+            var phase = reminders.Phase;
+            var pauses = reminders.PausedBy;
+            var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
+            reminders.Update(environment);
+            if (scheduledSurface && (reminders.PausedBy != ReminderPause.None || phase != reminders.Phase))
+            {
+                Dismiss();
+            }
+            if (checkpointDirty || phase != reminders.Phase || pauses != reminders.PausedBy ||
+                Environment.TickCount64 - lastCheckpoint >= CheckpointInterval.TotalMilliseconds)
+            {
+                PersistCheckpoint();
+            }
+            SynchronizeScheduledSurface();
+        }
+
+        UpdateReminderStatus(systemPause);
+    }
+
+    private void SynchronizeScheduledSurface()
+    {
+        var phase = reminders.Phase;
+        if (reminderStorageError || reminders.PausedBy != ReminderPause.None || phase is ReminderPhase.Work or ReminderPhase.Snoozed)
+        {
+            if (scheduledSurface)
+            {
+                Dismiss();
+            }
+            return;
+        }
+
+        var intended = phase == ReminderPhase.Warning ? Surface.Warning : Surface.Preview;
+        if (!scheduledSurface || visible != intended)
+        {
+            if (scheduledSurface)
+            {
+                Dismiss();
+            }
+
+            var task = intended == Surface.Preview && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
+            var systemPause = desktop.GetSystemPause(checkPresentation: true);
+            reminders.StartVisibleCountdown();
+            if (systemPause != ReminderPause.None || IsEditingOrPreviewing())
+            {
+                reminders.Update(systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None));
+                return;
+            }
+
+            returnWindow = desktop.WorkWindow();
+            visible = intended;
+            scheduledSurface = true;
+            if (intended == Surface.Warning)
+            {
+                warning.Show(returnWindow, reminders.IsLongBreak ? "Long break" : "Short break");
+            }
+            else
+            {
+                desktop.DismissLabel = "End break";
+                preview.Show(returnWindow, BreakLayout.Compact, task?.Title, task?.NextStep, reminders.IsLongBreak);
+            }
+            reminders.StartVisibleCountdown();
+        }
+
+        var seconds = Math.Max(1, (int)Math.Ceiling(reminders.Remaining.TotalSeconds));
+        if (intended == Surface.Warning)
+        {
+            warning.Update(seconds);
+        }
+        else
+        {
+            preview.Update(seconds);
+        }
+    }
+
+    private void StopScheduledSurfaceForInput()
+    {
+        if (!scheduledSurface)
+        {
+            return;
+        }
+
+        if (visible == Surface.Preview)
+        {
+            reminders.Skip();
+        }
+        else
+        {
+            reminders.Update(ReminderPause.Interaction);
+        }
+        Dismiss();
+        checkpointDirty = true;
+    }
+
+    private void EndVisibleBreak()
+    {
+        if (visible is not (Surface.Warning or Surface.Preview))
+        {
+            return;
+        }
+
+        if (scheduledSurface)
+        {
+            SkipReminder();
+        }
+        else
+        {
+            Dismiss();
+        }
+    }
+
+    private void SnoozeReminder()
+    {
+        if (reminders.Phase == ReminderPhase.Warning && !reminderStorageError)
+        {
+            reminders.Snooze();
+            FinishReminderAction();
+        }
+    }
+
+    private void SkipReminder()
+    {
+        if (reminders.Phase != ReminderPhase.Work && !reminderStorageError)
+        {
+            reminders.Skip();
+            FinishReminderAction();
+        }
+    }
+
+    private void FinishReminderAction()
+    {
+        if (scheduledSurface)
+        {
+            Dismiss();
+        }
+        PersistCheckpoint();
+        UpdateScheduledReminders();
+    }
+
+    private bool SaveSettings(ReminderSettings settings)
+    {
+        var candidate = reminders.WithSettings(settings);
+        if (!TryPersist(settings, candidate.Checkpoint()))
+        {
+            return false;
+        }
+
+        reminders = candidate;
+        reminderLoadError = false;
+        UpdateReminderTimer();
+        UpdateScheduledReminders();
+        return true;
+    }
+
+    private void TogglePresentationPause()
+    {
+        var paused = !reminders.ManuallyPaused;
+        if (reminderLoadError)
+        {
+            reminders.SetManualPause(paused);
+            UpdateScheduledReminders(recheckPresentation: true);
+            return;
+        }
+
+        if (paused)
+        {
+            reminders.SetManualPause(true);
+            UpdateScheduledReminders(recheckPresentation: true);
+        }
+
+        if (TryPersist(reminders.Settings, reminders.Checkpoint() with { ManuallyPaused = paused }))
+        {
+            reminders.SetManualPause(paused);
+            UpdateReminderTimer();
+        }
+        UpdateScheduledReminders(recheckPresentation: true);
+    }
+
+    private void PersistCheckpoint() => TryPersist(reminders.Settings, reminders.Checkpoint());
+
+    private bool TryPersist(ReminderSettings settings, ReminderCheckpoint checkpoint)
+    {
+        try
+        {
+            tasks.SaveReminders(settings, checkpoint);
+            lastCheckpoint = Environment.TickCount64;
+            checkpointDirty = false;
+            reminderStorageError = false;
+            return true;
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            reminderStorageError = true;
+            if (scheduledSurface)
+            {
+                Dismiss();
+            }
+            UpdateReminderTimer();
+            UpdateReminderStatus(ReminderPause.None);
+            return false;
+        }
+    }
+
+    private void UpdateReminderStatus(ReminderPause systemPause)
+    {
+        var pauses = reminders.PausedBy;
+        var phase = reminders.Phase;
+        desktop.ManuallyPaused = reminders.ManuallyPaused;
+        desktop.PreviewAvailable = visible == Surface.None && !reminderLoadError && !reminders.ManuallyPaused;
+        desktop.SnoozeAvailable = !reminderStorageError && reminders.Settings.Enabled && !reminders.ManuallyPaused &&
+            phase == ReminderPhase.Warning && (scheduledSurface || pauses == ReminderPause.Interaction);
+        desktop.SkipAvailable = desktop.SnoozeAvailable ||
+            (!reminderStorageError && reminders.Settings.Enabled && phase == ReminderPhase.Snoozed);
+        desktop.ReminderStatus = reminders.ManuallyPaused ? "Paused for presentation" :
+            reminderStorageError ? "Reminders unavailable · Check settings" :
+            !reminders.Settings.Enabled ? "Reminders off" :
+            (pauses & ReminderPause.OutsideHours) != 0 ? "Reminders on · Outside working hours" :
+            ((pauses | systemPause) & (ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.Presentation)) != 0 ? "Reminders on · Paused by Windows" :
+            phase == ReminderPhase.Snoozed ? "Reminders on · Snoozed" :
+            phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval";
+        reminderSettings?.SetStatus(desktop.ReminderStatus);
+    }
+}

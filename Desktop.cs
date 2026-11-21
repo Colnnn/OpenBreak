@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Afterbreak;
 
@@ -11,6 +12,10 @@ internal enum TrayCommand
     Quit,
     PreviewSampleBoard,
     Tasks,
+    Settings,
+    TogglePause,
+    Snooze,
+    Skip,
 }
 
 internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
@@ -20,6 +25,11 @@ internal sealed class Desktop : IDisposable
     private const uint TrayMessage = 0x8001;
     private const uint HotkeyMessage = 0x0312;
     private const uint ContextMenu = 0x007B;
+    private const uint DisplayChange = 0x007E;
+    private const uint SettingChange = 0x001A;
+    private const uint TimeChange = 0x001E;
+    private const uint PowerBroadcast = 0x0218;
+    private const uint SessionChange = 0x02B1;
     private const uint SelectNotification = 0x0400;
     private const uint KeyboardSelectNotification = 0x0401;
     private const uint HotkeyModifiers = 0x4003; // Ctrl, Alt, and no repeat.
@@ -32,10 +42,14 @@ internal sealed class Desktop : IDisposable
     private readonly uint taskbarCreated;
     private readonly nint window;
     private readonly nint foregroundHook;
+    private readonly bool sessionNotifications;
     private readonly uint process = (uint)Environment.ProcessId;
     private nint lastWorkWindow;
-    private bool lastWorkWasBoard;
+    private nint lastOwnWorkWindow;
     private bool iconAdded;
+    private bool locked;
+    private bool disconnected;
+    private bool suspended;
 
     internal Desktop()
     {
@@ -68,6 +82,7 @@ internal sealed class Desktop : IDisposable
         }
         foregroundHook = SetWinEventHook(
             ForegroundEvent, ForegroundEvent, 0, foregroundProcedure, 0, 0, 0x0002);
+        sessionNotifications = WTSRegisterSessionNotification(window, 0); // This session only.
         ShortcutAvailable = RegisterHotKey(window, 1, HotkeyModifiers, 'K');
         AddIcon();
     }
@@ -75,16 +90,54 @@ internal sealed class Desktop : IDisposable
     internal bool ShortcutAvailable { get; }
     internal string? DismissLabel { get; set; }
     internal nint BoardHandle { get; set; }
+    internal nint SettingsHandle { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
+    internal bool MenuOpen { get; private set; }
+    internal bool SnoozeAvailable { get; set; }
+    internal bool SkipAvailable { get; set; }
+    internal bool ManuallyPaused { get; set; }
+    internal string ReminderStatus { get; set; } = "Reminders off";
     internal event Action<TrayCommand, nint>? Command;
+    internal event Action? EligibilityChanged;
+    internal event Action? DisplaysChanged;
+
+    internal ReminderPause GetSystemPause(bool checkPresentation)
+    {
+        var pause = (locked || disconnected ? ReminderPause.Locked : ReminderPause.None) |
+            (suspended ? ReminderPause.Suspended : ReminderPause.None);
+        if (pause == ReminderPause.None && (!HasInputDesktop() ||
+            (checkPresentation && (SHQueryUserNotificationState(out var state) != 0 || state != 5))))
+        {
+            pause |= ReminderPause.Presentation;
+        }
+        return pause;
+    }
+
+    private static bool HasInputDesktop()
+    {
+        var input = OpenInputDesktop(0, false, 1); // DESKTOP_READOBJECTS
+        if (input == 0)
+        {
+            return false;
+        }
+        try
+        {
+            var name = new StringBuilder(128);
+            return GetUserObjectInformation(input, 2, name, name.Capacity * sizeof(char), out _) && name.ToString() == "Default";
+        }
+        finally
+        {
+            CloseDesktop(input);
+        }
+    }
 
     internal nint WorkWindow()
     {
         var active = GetForegroundWindow();
         ObserveWorkWindow(active);
-        if (lastWorkWasBoard && IsWindowVisible(BoardHandle) && !IsIconic(BoardHandle))
+        if (lastOwnWorkWindow != 0 && IsWindowVisible(lastOwnWorkWindow) && !IsIconic(lastOwnWorkWindow))
         {
-            return BoardHandle;
+            return lastOwnWorkWindow;
         }
 
         return IsWindow(lastWorkWindow) ? lastWorkWindow : 0;
@@ -131,6 +184,10 @@ internal sealed class Desktop : IDisposable
         {
             UnregisterHotKey(window, 1);
         }
+        if (sessionNotifications)
+        {
+            WTSUnRegisterSessionNotification(window);
+        }
         if (iconAdded)
         {
             var data = IconData();
@@ -160,14 +217,14 @@ internal sealed class Desktop : IDisposable
 
     private void ObserveWorkWindow(nint candidate)
     {
-        if (candidate != 0 && candidate == BoardHandle)
+        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle))
         {
-            lastWorkWasBoard = true;
+            lastOwnWorkWindow = candidate;
         }
         else if (IsWorkWindow(candidate))
         {
             lastWorkWindow = candidate;
-            lastWorkWasBoard = false;
+            lastOwnWorkWindow = 0;
         }
     }
 
@@ -205,16 +262,30 @@ internal sealed class Desktop : IDisposable
         }
 
         TrayCommand command;
+        MenuOpen = true;
         try
         {
             AppendMenu(menu, 0, (nuint)TrayCommand.Tasks, "Open Tasks");
             AppendMenu(menu, 0, (nuint)TrayCommand.Capture, ShortcutAvailable ? "Capture task\tCtrl+Alt+K" : "Capture task");
-            var previewFlags = PreviewAvailable ? 0u : 1u; // MF_GRAYED
+            var previewFlags = PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None ? 0u : 1u; // MF_GRAYED
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.Preview, "Preview a break");
             AppendMenu(menu, previewFlags, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
             if (DismissLabel is { } dismissLabel)
             {
                 AppendMenu(menu, 0, (nuint)TrayCommand.EndBreak, dismissLabel);
+            }
+            AppendMenu(menu, 0x0800, 0, null);
+            AppendMenu(menu, 1, 0, ReminderStatus);
+            AppendMenu(menu, 0, (nuint)TrayCommand.Settings, "Reminder settings");
+            AppendMenu(menu, 0, (nuint)TrayCommand.TogglePause,
+                ManuallyPaused ? "Resume after presentation" : "Pause for presentation");
+            if (SnoozeAvailable)
+            {
+                AppendMenu(menu, 0, (nuint)TrayCommand.Snooze, "Snooze 5 min");
+            }
+            if (SkipAvailable)
+            {
+                AppendMenu(menu, 0, (nuint)TrayCommand.Skip, "Skip break");
             }
             AppendMenu(menu, 0x0800, 0, null);
             AppendMenu(menu, 0, (nuint)TrayCommand.Quit, "Quit Afterbreak");
@@ -226,6 +297,7 @@ internal sealed class Desktop : IDisposable
         }
         finally
         {
+            MenuOpen = false;
             DestroyMenu(menu);
         }
 
@@ -241,6 +313,37 @@ internal sealed class Desktop : IDisposable
 
     private nint HandleMessage(nint hwnd, uint message, nuint wParam, nint lParam)
     {
+        if (message == SessionChange && wParam is 1 or 2 or 3 or 4 or 7 or 8)
+        {
+            switch (wParam)
+            {
+                case 1 or 3: disconnected = false; break;
+                case 2 or 4: disconnected = true; break;
+                case 7: locked = true; break;
+                case 8: locked = false; suspended = false; break;
+            }
+            EligibilityChanged?.Invoke();
+            return 0;
+        }
+        if (message == PowerBroadcast && wParam is 4 or 7 or 18)
+        {
+            // Automatic wake may be unattended. Wait for a user resume or session unlock.
+            suspended = wParam != 7;
+            EligibilityChanged?.Invoke();
+            return 1;
+        }
+        if (message == TimeChange)
+        {
+            TimeZoneInfo.ClearCachedData();
+        }
+        if (message is SettingChange or TimeChange)
+        {
+            EligibilityChanged?.Invoke();
+        }
+        if (message == DisplayChange)
+        {
+            DisplaysChanged?.Invoke();
+        }
         if (message == HotkeyMessage && wParam == 1)
         {
             Command?.Invoke(TrayCommand.Capture, WorkWindow());
@@ -335,6 +438,18 @@ internal sealed class Desktop : IDisposable
     private static extern nint LoadIcon(nint instance, nint icon);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIcon(uint message, ref NotifyIconData data);
+    [DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int state);
+    [DllImport("wtsapi32.dll")]
+    private static extern bool WTSRegisterSessionNotification(nint window, uint flags);
+    [DllImport("wtsapi32.dll")]
+    private static extern bool WTSUnRegisterSessionNotification(nint window);
+    [DllImport("user32.dll")]
+    private static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetUserObjectInformation(nint handle, int index, StringBuilder value, int length, out int required);
+    [DllImport("user32.dll")]
+    private static extern bool CloseDesktop(nint desktop);
     private static bool ShellNotifyIcon(uint message, ref NotifyIconData data) => Shell_NotifyIcon(message, ref data);
     [DllImport("user32.dll")]
     private static extern nint CreatePopupMenu();

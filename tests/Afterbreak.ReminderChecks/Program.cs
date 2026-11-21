@@ -1,0 +1,190 @@
+namespace Afterbreak;
+
+internal static class Program
+{
+    private static readonly DateTimeOffset Noon = new(2026, 1, 2, 12, 0, 0, TimeSpan.Zero);
+    private static readonly ReminderSettings ShortCycle = ReminderSettings.Default with
+    {
+        Enabled = true, WorkSeconds = 5, ShortSeconds = 3, LongSeconds = 8,
+    };
+
+    private static void Main()
+    {
+        CadenceAndSnooze();
+        OverlappingPauses();
+        SleepAndInterruption();
+        ClockAndHours();
+        Restart();
+    }
+
+    private static void CadenceAndSnooze()
+    {
+        var defaults = ReminderSettings.Default;
+        Expect(!defaults.Enabled && defaults.WorkSeconds == 1800 && defaults.ShortSeconds == 30 && defaults.LongSeconds == 300,
+            "default is opt-out with 30m work, 30s short and 5m long");
+        var clock = new TestClock(Noon);
+        var scheduler = new ReminderScheduler(clock, ShortCycle);
+        Step(scheduler, clock, 5);
+        Expect(scheduler.Phase == ReminderPhase.Warning && scheduler.Remaining.TotalSeconds == 10, "work gives a ten-second warning");
+        scheduler.Snooze();
+        for (var snooze = 0; snooze < 2; snooze++)
+        {
+            Step(scheduler, clock, 299);
+            Expect(scheduler.Phase == ReminderPhase.Snoozed && scheduler.Remaining.TotalSeconds == 1 && scheduler.CompletedShorts == 0,
+                "snooze waits five minutes without advancing cadence");
+            Step(scheduler, clock, 1);
+            Expect(scheduler.Phase == ReminderPhase.Warning && scheduler.Remaining.TotalSeconds == 10,
+                "each snoozed reminder returns with a fresh warning");
+            if (snooze == 0)
+            {
+                scheduler.Snooze();
+            }
+        }
+        scheduler.Skip();
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.CompletedShorts == 0 && scheduler.Remaining.TotalSeconds == 5,
+            "skip starts fresh work without advancing cadence");
+
+        for (var count = 0; count < 3; count++)
+        {
+            Step(scheduler, clock, 15);
+            Expect(scheduler.Phase == ReminderPhase.Break && scheduler.Remaining.TotalSeconds == 3, "scheduled short break has the configured duration");
+            Step(scheduler, clock, 3);
+            Expect(scheduler.CompletedShorts == count + 1, "natural short completion advances cadence once");
+        }
+        Step(scheduler, clock, 15);
+        Expect(scheduler.IsLongBreak && scheduler.Remaining.TotalSeconds == 8, "three completed shorts make the next break long");
+        scheduler.Skip();
+        Expect(scheduler.IsLongBreak && scheduler.Phase == ReminderPhase.Work, "ending the long break early keeps it due");
+        Step(scheduler, clock, 23);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.CompletedShorts == 0, "only natural long completion resets the cadence");
+    }
+
+    private static void OverlappingPauses()
+    {
+        var clock = new TestClock(Noon);
+        var settings = ShortCycle with { WorkSeconds = 30, ShortSeconds = 10 };
+        var scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 12);
+        scheduler.SetManualPause(true);
+        scheduler.Update(ReminderPause.None);
+        Step(scheduler, clock, 2, ReminderPause.Locked);
+        scheduler.SetManualPause(false);
+        Step(scheduler, clock, 4, ReminderPause.Locked | ReminderPause.Presentation);
+        Step(scheduler, clock, 2, ReminderPause.Presentation);
+        Expect(scheduler.PausedBy == ReminderPause.Presentation && scheduler.Remaining.TotalSeconds == 18,
+            "each independent pause clears without resuming through another reason");
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Remaining.TotalSeconds == 18, "short overlapping absence preserves work remaining");
+
+        scheduler.Update(ReminderPause.Locked);
+        Step(scheduler, clock, 5, ReminderPause.Locked | ReminderPause.Presentation);
+        Step(scheduler, clock, 5, ReminderPause.Presentation);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Remaining.TotalSeconds == 30 && scheduler.CompletedShorts == 0,
+            "the union of overlapping away time earns a fresh work interval at the break length");
+        Step(scheduler, clock, 12);
+        scheduler.Update(ReminderPause.Interaction);
+        Step(scheduler, clock, 40, ReminderPause.Interaction);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Remaining.TotalSeconds == 18, "a long edit or preview defers without counting as rest");
+    }
+
+    private static void SleepAndInterruption()
+    {
+        var clock = new TestClock(Noon);
+        var scheduler = new ReminderScheduler(clock, ShortCycle);
+        Step(scheduler, clock, 14);
+        Step(scheduler, clock, 1, ReminderPause.Suspended);
+        Expect(scheduler.PausedBy == ReminderPause.Suspended && scheduler.Phase == ReminderPhase.Warning &&
+            scheduler.Remaining.TotalSeconds == 10, "suspend at warning expiry prevents the stale break");
+        clock.Advance(TimeSpan.FromHours(2));
+        scheduler.Update(ReminderPause.Locked);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.Remaining.TotalSeconds == 5 && scheduler.CompletedShorts == 0,
+            "sleep through a due break yields fresh work without backlog or cadence credit");
+
+        Step(scheduler, clock, 16);
+        scheduler.Update(ReminderPause.Presentation);
+        Step(scheduler, clock, 1, ReminderPause.Presentation);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Phase == ReminderPhase.Warning && scheduler.Remaining.TotalSeconds == 10,
+            "short interruption re-arms a full warning before a partially used break resumes");
+        Step(scheduler, clock, 10);
+        Expect(scheduler.Phase == ReminderPhase.Break && scheduler.Remaining.TotalSeconds == 2,
+            "a re-armed break retains its remaining duration");
+        clock.Advance(TimeSpan.FromHours(3));
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.CompletedShorts == 0, "an unobserved suspend gap does not complete a break");
+    }
+
+    private static void ClockAndHours()
+    {
+        var clock = new TestClock(Noon);
+        var scheduler = new ReminderScheduler(clock, ShortCycle);
+        Step(scheduler, clock, 2);
+        clock.ShiftWall(TimeSpan.FromHours(-8));
+        scheduler.Update(ReminderPause.None);
+        clock.ShiftWall(TimeSpan.FromHours(35));
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Remaining.TotalSeconds == 3, "manual wall changes do not change the monotonic countdown");
+
+        var overnight = ShortCycle with { WorkingHours = true, StartMinute = 22 * 60, EndMinute = 6 * 60 };
+        clock = new TestClock(new DateTimeOffset(2026, 1, 2, 23, 59, 58, TimeSpan.Zero));
+        scheduler = new ReminderScheduler(clock, overnight);
+        Step(scheduler, clock, 5);
+        Expect(scheduler.Phase == ReminderPhase.Warning, "an overnight working window continues across midnight");
+        clock.ShiftWall(TimeSpan.FromHours(5) + TimeSpan.FromMinutes(59) + TimeSpan.FromSeconds(47));
+        Step(scheduler, clock, 10);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.PausedBy == ReminderPause.OutsideHours,
+            "closing hours at warning expiry prevents an overlay");
+        clock.ShiftWall(TimeSpan.FromHours(16));
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.PausedBy == ReminderPause.None && scheduler.Remaining.TotalSeconds == 5, "the next opening starts a fresh interval");
+    }
+
+    private static void Restart()
+    {
+        var clock = new TestClock(Noon);
+        var settings = ShortCycle with { WorkSeconds = 35, ShortSeconds = 30 };
+        var scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 15);
+        scheduler.SetManualPause(true);
+        scheduler.Update(ReminderPause.None);
+        Step(scheduler, clock, 20);
+        var saved = scheduler.Checkpoint();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        scheduler = new ReminderScheduler(clock, settings, saved);
+        Step(scheduler, clock, 9);
+        scheduler.SetManualPause(false);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.Remaining.TotalSeconds == 35, "restart retains accrued manual pause credit");
+
+        Step(scheduler, clock, 35);
+        var interrupted = scheduler.Checkpoint();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        scheduler = new ReminderScheduler(clock, settings, interrupted);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.Remaining.TotalSeconds == 35,
+            "restart never reopens an old warning or overlay");
+        scheduler = new ReminderScheduler(clock, settings with { Enabled = false }, saved);
+        Expect(scheduler.ManuallyPaused && scheduler.Phase == ReminderPhase.Work,
+            "presentation pause survives restart even with scheduled reminders off");
+    }
+
+    private static void Step(ReminderScheduler scheduler, TestClock clock, int seconds, ReminderPause reasons = ReminderPause.None)
+    {
+        for (var index = 0; index < seconds; index++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(1));
+            scheduler.Update(reasons);
+        }
+    }
+
+    private static void Expect(bool passed, string name)
+    {
+        if (!passed)
+        {
+            throw new InvalidOperationException(name);
+        }
+        Console.WriteLine($"PASS {name}");
+    }
+}

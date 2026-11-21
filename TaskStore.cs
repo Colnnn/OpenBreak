@@ -11,12 +11,12 @@ internal enum TaskStatus
 
 internal sealed record BoardTask(long Id, string Title, string? NextStep, TaskStatus Status);
 
-internal sealed class TaskStore(string path)
+internal sealed partial class TaskStore(string path)
 {
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -219,6 +219,7 @@ internal sealed class TaskStore(string path)
                 archived INTEGER NOT NULL CHECK (archived IN (0, 1))
             ) STRICT;
             CREATE INDEX task_order ON tasks (archived, status, position, id);
+            {ReminderTable}
             PRAGMA application_id = {ApplicationId};
             PRAGMA user_version = {SchemaVersion};
             """);
@@ -228,12 +229,50 @@ internal sealed class TaskStore(string path)
 
     private static void RequireCurrentSchema(SqliteConnection connection)
     {
-        using var appId = Command(connection, null, "PRAGMA application_id");
-        using var version = Command(connection, null, "PRAGMA user_version");
-        if ((long)appId.ExecuteScalar()! != ApplicationId || (long)version.ExecuteScalar()! != SchemaVersion)
+        if (ReadPragma(connection, null, "PRAGMA application_id") != ApplicationId)
         {
             throw new InvalidDataException("The file is not a supported Afterbreak database.");
         }
+
+        var version = ReadPragma(connection, null, "PRAGMA user_version");
+        if (version == 1)
+        {
+            using var transaction = connection.BeginTransaction();
+            version = ReadPragma(connection, transaction, "PRAGMA user_version");
+            if (version == 1)
+            {
+                if (ReadPragma(connection, transaction, "PRAGMA application_id") != ApplicationId)
+                {
+                    throw new InvalidDataException("The file is not a supported Afterbreak database.");
+                }
+                using var integrity = Command(connection, transaction, "PRAGMA quick_check(1)");
+                if (integrity.ExecuteScalar() as string != "ok")
+                {
+                    throw new InvalidDataException("The task database did not pass its integrity check.");
+                }
+                using var tasks = Command(connection, transaction,
+                    "SELECT id, title, next_step, status, position, archived FROM tasks LIMIT 0");
+                using (tasks.ExecuteReader()) { }
+                using var migration = Command(connection, transaction, $"""
+                    {ReminderTable}
+                    PRAGMA user_version = {SchemaVersion};
+                    """);
+                migration.ExecuteNonQuery();
+                version = SchemaVersion;
+            }
+            transaction.Commit();
+        }
+
+        if (version != SchemaVersion)
+        {
+            throw new InvalidDataException("The file is not a supported Afterbreak database.");
+        }
+    }
+
+    private static long ReadPragma(SqliteConnection connection, SqliteTransaction? transaction, string text)
+    {
+        using var command = Command(connection, transaction, text);
+        return (long)command.ExecuteScalar()!;
     }
 
     private static TaskStatus GetStatus(SqliteConnection connection, SqliteTransaction transaction, long id, bool archived)

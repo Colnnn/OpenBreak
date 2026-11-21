@@ -7,7 +7,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../AfterbreakSession.cs" Link="AfterbreakSession.cs" />
+    <Compile Include="../../ReminderSession.cs" Link="ReminderSession.cs" />
+    <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
     <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />
+    <Compile Include="../TestClock.cs" Link="TestClock.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.34" />
   </ItemGroup>
 </Project>

@@ -17,6 +17,10 @@ internal static class Program
             Console.WriteLine("PASS rejected inserts and edits preserve data; partial reordering rolls back");
             await PublishAtomically(Path.Combine(temporary.FullName, "parallel"));
             Console.WriteLine("PASS concurrent first writes and abandoned initialization file");
+            CheckReminderMigration(temporary.FullName);
+            Console.WriteLine("PASS schema-one migration, physical corruption and failed migration preservation");
+            CheckReminderWriteFailure(Path.Combine(temporary.FullName, "reminder-writes.db"));
+            Console.WriteLine("PASS reminder settings and checkpoint commit together and roll back together");
         }
         finally
         {
@@ -141,6 +145,89 @@ internal static class Program
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.ExecuteNonQuery();
+    }
+
+    private static void CheckReminderMigration(string folder)
+    {
+        var path = Path.Combine(folder, "migration.db");
+        CreateSchemaOne(path);
+        var before = TaskFingerprint(path);
+        var store = new TaskStore(path);
+        var loaded = store.LoadReminders();
+        Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
+            "Migration never opts into reminders.");
+        Require(Scalar(path, "PRAGMA user_version") is 2L && TaskFingerprint(path) == before,
+            "Migration preserves each task ID, title, next step, lane order and archive flag.");
+
+        var blocked = Path.Combine(folder, "blocked-migration.db");
+        CreateSchemaOne(blocked);
+        ExecuteSql(blocked, "CREATE TABLE reminder_state (contents TEXT); INSERT INTO reminder_state VALUES ('keep');");
+        var bytes = File.ReadAllBytes(blocked);
+        ExpectStorageError(() => new TaskStore(blocked).LoadReminders());
+        Require(File.ReadAllBytes(blocked).SequenceEqual(bytes) && Scalar(blocked, "PRAGMA user_version") is 1L,
+            "An incompatible schema-one change rolls back without replacing any data.");
+
+        var corrupt = Path.Combine(folder, "corrupt-migration.db");
+        CreateSchemaOne(corrupt);
+        var page = (long)Scalar(corrupt, "SELECT rootpage FROM sqlite_schema WHERE name = 'tasks'")!;
+        var size = (long)Scalar(corrupt, "PRAGMA page_size")!;
+        using (var file = File.OpenWrite(corrupt))
+        {
+            file.Position = (page - 1) * size;
+            file.WriteByte(0);
+        }
+        bytes = File.ReadAllBytes(corrupt);
+        ExpectStorageError(() => new TaskStore(corrupt).LoadReminders());
+        Require(File.ReadAllBytes(corrupt).SequenceEqual(bytes), "Migration must not write to a corrupt task page.");
+    }
+
+    private static void CreateSchemaOne(string path) => ExecuteSql(path, $"""
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 140),
+            next_step TEXT CHECK (length(next_step) <= 480),
+            status INTEGER NOT NULL CHECK (status BETWEEN 0 AND 2),
+            position INTEGER NOT NULL CHECK (position >= 0),
+            archived INTEGER NOT NULL CHECK (archived IN (0, 1))
+        ) STRICT;
+        CREATE INDEX task_order ON tasks (archived, status, position, id);
+        PRAGMA application_id = {0x41465442};
+        PRAGMA user_version = 1;
+        INSERT INTO tasks VALUES (1, 'Last task', 'Read the notes', 0, 2, 0), (2, 'First task', NULL, 0, 1, 0),
+            (3, 'In progress', 'Continue at page three', 1, 0, 0), (4, 'Already done', NULL, 2, 0, 0),
+            (5, 'Archived task', 'Keep original status', 1, 0, 1);
+        """);
+
+    private static string? TaskFingerprint(string path) => Scalar(path, """
+        SELECT group_concat(id || ':' || title || ':' || coalesce(next_step, '') || ':' || status || ':' || position || ':' || archived)
+        FROM (SELECT * FROM tasks ORDER BY archived, status, position, id)
+        """) as string;
+
+    private static void CheckReminderWriteFailure(string path)
+    {
+        var store = new TaskStore(path);
+        store.Add("Unaffected task");
+        var initialTasks = TaskFingerprint(path);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 60, WorkingHours = true, TimerOnly = true };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Work, TimeSpan.FromSeconds(50), 2, true,
+            TimeSpan.FromSeconds(2), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        store.SaveReminders(settings, checkpoint);
+        Require(new TaskStore(path).LoadReminders() == (settings, checkpoint), "Reminder settings and checkpoint survive reopening.");
+        ExecuteSql(path, """
+            CREATE TRIGGER reject_reminders BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(ABORT, 'write failure'); END;
+            """);
+        ExpectStorageError(() => store.SaveReminders(settings with { Enabled = false }, checkpoint with { CompletedShorts = 0 }));
+        Require(new TaskStore(path).LoadReminders() == (settings, checkpoint) && TaskFingerprint(path) == initialTasks,
+            "A settings write failure preserves the prior configuration, checkpoint, and tasks.");
+    }
+
+    private static object? Scalar(string path, string sql)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
     }
 
     private static void ExpectStorageError(Action attempt)

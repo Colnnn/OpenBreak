@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />
+    <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.34" />
   </ItemGroup>
 </Project>

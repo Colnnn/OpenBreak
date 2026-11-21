@@ -213,6 +213,7 @@ try {
             Invoke-Checked $sdk @('restore', $suite, '--locked-mode', '--configfile', $config)
             Invoke-Checked $sdk @('run', '--project', $suite, '-c', $Configuration, '--no-restore')
         }
+        & (Join-Path $repository 'tests\Afterbreak.InstallerChecks\Test-InstallerPackage.ps1')
     } else {
         Invoke-Checked $sdk @('restore', $project, '--locked-mode', '--configfile', $config)
         if ($Action -eq 'Package') { Publish-Package $destination $source } else {

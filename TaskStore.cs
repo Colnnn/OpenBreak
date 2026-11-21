@@ -52,15 +52,17 @@ internal sealed partial class TaskStore(string path)
         return reader.Read() ? ReadTask(reader) : null;
     }
 
-    internal void Add(string title)
+    internal void Add(string title, string? nextStep = null)
     {
         title = NormalizeTitle(title);
+        nextStep = NormalizeNextStep(nextStep);
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         var position = NextPosition(connection, transaction, TaskStatus.ToDo, archived: false);
         using var insert = Command(connection, transaction, """
-            INSERT INTO tasks (title, status, position, archived) VALUES ($title, $status, $position, 0)
-            """, ("$title", title), ("$status", (int)TaskStatus.ToDo), ("$position", position));
+            INSERT INTO tasks (title, next_step, status, position, archived) VALUES ($title, $note, $status, $position, 0)
+            """, ("$title", title), ("$note", (object?)nextStep ?? DBNull.Value), ("$status", (int)TaskStatus.ToDo),
+            ("$position", position));
         insert.ExecuteNonQuery();
         transaction.Commit();
     }
@@ -68,16 +70,12 @@ internal sealed partial class TaskStore(string path)
     internal void Edit(long id, string title, string? nextStep)
     {
         title = NormalizeTitle(title);
-        nextStep = nextStep?.Trim();
-        if (nextStep?.Length > NextStepLimit)
-        {
-            throw new ArgumentException("The next step is too long.", nameof(nextStep));
-        }
+        nextStep = NormalizeNextStep(nextStep);
 
         using var connection = Open();
         using var update = Command(connection, null, """
             UPDATE tasks SET title = $title, next_step = $note WHERE id = $id AND archived = 0
-            """, ("$title", title), ("$note", string.IsNullOrEmpty(nextStep) ? DBNull.Value : nextStep), ("$id", id));
+            """, ("$title", title), ("$note", (object?)nextStep ?? DBNull.Value), ("$id", id));
         EnsureTaskChanged(update);
     }
 
@@ -349,6 +347,16 @@ internal sealed partial class TaskStore(string path)
         return text.Length is > 0 and <= TitleLimit
             ? text
             : throw new ArgumentException("The task title is missing or too long.", nameof(title));
+    }
+
+    private static string? NormalizeNextStep(string? nextStep)
+    {
+        var text = nextStep?.Trim();
+        if (text?.Length > NextStepLimit)
+        {
+            throw new ArgumentException("The next step is too long.", nameof(nextStep));
+        }
+        return string.IsNullOrEmpty(text) ? null : text;
     }
 
     private static BoardTask ReadTask(SqliteDataReader reader) => new(

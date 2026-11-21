@@ -11,6 +11,8 @@ internal static class Program
         {
             RoundTrip(Path.Combine(temporary.FullName, "roundtrip.db"));
             Console.WriteLine("PASS task edits, status moves, ordering, archive and restore across reopen");
+            CheckCaptureNotes(Path.Combine(temporary.FullName, "capture-notes.db"));
+            Console.WriteLine("PASS capture adds a normalized optional note atomically and respects edit limits");
             PreserveUnsupportedFiles(temporary.FullName);
             Console.WriteLine("PASS existing empty, corrupt, foreign and future-schema files remain unchanged");
             PreserveFailedWrites(Path.Combine(temporary.FullName, "writes.db"));
@@ -73,6 +75,45 @@ internal static class Program
         reopened.SetArchived(totals, archived: true);
         reopened.Move(notes, TaskStatus.Done);
         Require(reopened.ReturnTask() is null, "Done and archived cards leave a timer-only break.");
+    }
+
+    private static void CheckCaptureNotes(string path)
+    {
+        var store = new TaskStore(path);
+        var limitNote = new string('a', TaskStore.NextStepLimit);
+        store.Add("Title only");
+        store.Add("Blank note", " \t ");
+        store.Add(" Trimmed title ", "  Start with café prices; use 'B'.  ");
+        store.Add("At the limit", limitNote);
+        var before = new TaskStore(path).List(archived: false);
+        Require(before.Select(task => task.Title).SequenceEqual(["Title only", "Blank note", "Trimmed title", "At the limit"]),
+            "Capture appends titles to To do order and trims the title.");
+        Require(before.Select(task => task.NextStep).SequenceEqual([null, null, "Start with café prices; use 'B'.", limitNote]),
+            "The title-only, blank, Unicode and limit-length notes survive a reopen.");
+
+        foreach (var (title, note) in new[] { ("  ", "No title"), ("Too long", limitNote + "b") })
+        {
+            try
+            {
+                store.Add(title, note);
+                throw new InvalidOperationException("Capture accepted an invalid title or note.");
+            }
+            catch (ArgumentException) { }
+        }
+
+        ExecuteSql(path, """
+            CREATE TRIGGER reject_note BEFORE INSERT ON tasks
+            WHEN NEW.next_step = 'Blocked note' BEGIN SELECT RAISE(ABORT, 'capture failure'); END;
+            """);
+        ExpectStorageError(() => store.Add("Complete capture", "Blocked note"));
+        Require(new TaskStore(path).List(archived: false).SequenceEqual(before),
+            "Bad input and a rejected note insert leave all task fields and order intact.");
+        ExecuteSql(path, "DROP TRIGGER reject_note;");
+        store.Add("Complete capture", "Blocked note");
+        var reopened = new TaskStore(path).List(archived: false);
+        Require(reopened.Take(before.Count).SequenceEqual(before) && reopened.Count == before.Count + 1 &&
+            reopened[^1] is { Title: "Complete capture", NextStep: "Blocked note", Status: TaskStatus.ToDo },
+            "A successful retry appends exactly one complete task.");
     }
 
     private static void PreserveUnsupportedFiles(string folder)

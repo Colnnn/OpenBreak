@@ -59,18 +59,25 @@ internal static class Program
         var board = BoardWindow.Current;
         board.AddTask!();
         Check(capture.IsVisible && !tray.PreviewAvailable, "board Add uses capture and disables previews");
+        capture.NextStep = "Note without a title";
+        var returnsBeforeNoteOnly = SurfaceWindow.Returns;
+        Check(!capture.Save("  ", capture.NextStep) && capture.IsVisible && store.List(archived: false).Count == 1 &&
+            SurfaceWindow.Returns == returnsBeforeNoteOnly && capture.NextStep == "Note without a title",
+            "a next step without a title keeps the draft and creates no task");
         capture.Cancel();
 
         var edit = new BoardWindow.CardFocus(first.Id, BoardWindow.CardAction.Edit);
         board.FocusedCard = edit;
         tray.Send(TrayCommand.Capture, board.Handle);
+        Check(capture.Input == "" && capture.NextStep == "", "fresh capture clears both canceled fields");
         capture.Input = "Draft retained across storage failure";
+        capture.NextStep = "  Check the original subtotal  ";
         var connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
         using (var blocker = new SqliteConnection(connectionString))
         {
             blocker.Open();
             using var lockDatabase = blocker.BeginTransaction();
-            Check(!capture.Save(capture.Input), "locked database reports failed capture save");
+            Check(!capture.Save(capture.Input, capture.NextStep), "locked database reports failed capture save");
             var captures = capture.Shows;
             var warnings = WarningWindow.Shows;
             tray.Send(TrayCommand.Preview);
@@ -78,16 +85,21 @@ internal static class Program
             board.FocusedCard = null;
             tray.Send(TrayCommand.Capture, board.Handle);
             Check(capture.IsVisible && capture.Input == "Draft retained across storage failure" && capture.Shows == captures
-                && WarningWindow.Shows == warnings && !queue.Timer.Running,
-                "failed draft survives both preview commands and capture reinvocation");
+                && capture.NextStep == "  Check the original subtotal  " && WarningWindow.Shows == warnings && !queue.Timer.Running,
+                "both failed draft fields survive preview commands and capture reinvocation");
             lockDatabase.Rollback();
         }
 
-        Check(capture.Save(capture.Input), "same draft saves on retry");
+        Check(capture.Save(capture.Input, capture.NextStep), "same draft with its next step saves on retry");
         Check(!capture.IsVisible && tray.PreviewAvailable && SurfaceWindow.Returned == board.Handle && board.Refreshes == 1,
             "successful save returns to board and refreshes it");
         Check(board.LastRefreshFocus == edit, "retry after a failed save retains the original Edit target");
-        Check(new TaskStore(path).List(archived: false).Count == 2, "capture commits once and survives a new store instance");
+        var saved = new TaskStore(path).List(archived: false);
+        Check(saved.Count == 2 && saved.Single(task => task.Status == TaskStatus.ToDo) is
+            { Title: "Draft retained across storage failure", NextStep: "Check the original subtotal" },
+            "retry commits one task and note that survive a new store instance");
+        Check(!capture.Save(capture.Input, capture.NextStep) && store.List(archived: false).SequenceEqual(saved),
+            "a repeated save after capture closes cannot duplicate the task");
 
         Preview();
         Check(BreakWindow.Layout == BreakLayout.Compact && BreakWindow.Text == first.Title && BreakWindow.Note == "Resume at page two",
@@ -108,7 +120,8 @@ internal static class Program
 
         store.SetArchived(first.Id, archived: true);
         Preview();
-        Check(BreakWindow.Text == capture.Input, "archived In progress task falls back to first To do");
+        Check(BreakWindow.Text == capture.Input && BreakWindow.Note == "Check the original subtotal",
+            "archived In progress task falls back to the captured To do title and next step");
         tray.Send(TrayCommand.EndBreak);
         foreach (var task in store.List(archived: false))
         {

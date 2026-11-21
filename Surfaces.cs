@@ -15,16 +15,24 @@ namespace Afterbreak;
 
 internal sealed class CaptureWindow : Window
 {
+    private const string CaptureHint = "Enter to save · Esc to cancel";
+    private const int CompactHeight = 190;
+    private const int ExpandedHeight = 235;
     private readonly TextBox input;
+    private readonly TextBox nextStep;
+    private readonly Button addNextStep;
     private readonly TextBlock title;
     private readonly TextBlock hint;
-    private readonly Func<string, bool> save;
+    private readonly Func<string, string?, bool> save;
+    private TextBox editingField;
     private nint sourceWindow;
     private bool placed;
     private int windowWidth = 460;
-    private int windowHeight = 165;
+    private int compactHeight = CompactHeight;
+    private int expandedHeight = ExpandedHeight;
+    private int WindowHeight => nextStep.Visibility == Visibility.Visible ? expandedHeight : compactHeight;
 
-    internal CaptureWindow(Func<string, bool> save, Action cancel)
+    internal CaptureWindow(Func<string, string?, bool> save, Action cancel)
     {
         this.save = save;
         Title = "Afterbreak · Capture task";
@@ -36,7 +44,24 @@ internal sealed class CaptureWindow : Window
             MaxLength = TaskStore.TitleLimit,
         };
         AutomationProperties.SetName(input, "Task title");
-        hint = SurfaceStyle.SecondaryLabel("Enter to save · Esc to cancel", 12);
+        nextStep = new TextBox
+        {
+            Header = "Next step (optional)",
+            MaxLength = TaskStore.NextStepLimit,
+            AcceptsReturn = false,
+            Visibility = Visibility.Collapsed,
+        };
+        AutomationProperties.SetName(nextStep, "Next step (optional)");
+        editingField = input;
+        input.GotFocus += (_, _) => editingField = input;
+        nextStep.GotFocus += (_, _) => editingField = nextStep;
+        addNextStep = new Button
+        {
+            Content = new TextBlock { Text = "Add next step", TextWrapping = TextWrapping.Wrap },
+        };
+        AutomationProperties.SetName(addNextStep, "Add next step");
+        addNextStep.Click += (_, _) => ExpandNextStep();
+        hint = SurfaceStyle.SecondaryLabel(CaptureHint, 12);
         hint.TextWrapping = TextWrapping.Wrap;
 
         var saveButton = new Button
@@ -55,8 +80,10 @@ internal sealed class CaptureWindow : Window
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        hint.VerticalAlignment = VerticalAlignment.Center;
-        footer.Children.Add(hint);
+        var instructions = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        instructions.Children.Add(addNextStep);
+        instructions.Children.Add(hint);
+        footer.Children.Add(instructions);
         Grid.SetColumn(saveButton, 1);
         footer.Children.Add(saveButton);
         footer.SizeChanged += (_, args) =>
@@ -64,13 +91,14 @@ internal sealed class CaptureWindow : Window
             var stack = args.NewSize.Width < saveButton.DesiredSize.Width + 140;
             Grid.SetColumn(saveButton, stack ? 0 : 1);
             Grid.SetRow(saveButton, stack ? 1 : 0);
-            Grid.SetColumnSpan(hint, stack ? 2 : 1);
+            Grid.SetColumnSpan(instructions, stack ? 2 : 1);
             footer.RowSpacing = stack ? 8 : 0;
         };
 
         var body = new StackPanel { Spacing = 12, Margin = new Thickness(20, 17, 20, 17) };
         body.Children.Add(title);
         body.Children.Add(input);
+        body.Children.Add(nextStep);
         body.Children.Add(footer);
         var panel = SurfaceStyle.Frame(SurfaceStyle.Scroll(body));
         panel.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) =>
@@ -80,7 +108,8 @@ internal sealed class CaptureWindow : Window
                 args.Handled = true;
                 cancel();
             }
-            else if (args.Key == VirtualKey.Enter && input.FocusState != FocusState.Unfocused && !args.Handled)
+            else if (args.Key == VirtualKey.Enter && !args.Handled &&
+                (input.FocusState != FocusState.Unfocused || nextStep.FocusState != FocusState.Unfocused))
             {
                 args.Handled = true;
                 Save();
@@ -92,10 +121,10 @@ internal sealed class CaptureWindow : Window
         {
             if (args.WindowActivationState != WindowActivationState.Deactivated)
             {
-                input.Focus(FocusState.Programmatic);
+                FocusDraftField();
             }
         };
-        input.Loaded += (_, _) => input.Focus(FocusState.Programmatic);
+        input.Loaded += (_, _) => FocusDraftField();
         AppWindow.Closing += (_, args) =>
         {
             args.Cancel = true;
@@ -105,19 +134,23 @@ internal sealed class CaptureWindow : Window
 
     internal bool TryShow(nint source)
     {
-        if (!TryPosition(source))
+        if (!TryPosition(source, compactHeight))
         {
             return false;
         }
         input.Text = "";
-        hint.Text = "Enter to save · Esc to cancel";
+        nextStep.Text = "";
+        nextStep.Visibility = Visibility.Collapsed;
+        addNextStep.Visibility = Visibility.Visible;
+        editingField = input;
+        hint.Text = CaptureHint;
         ShowInput();
         return true;
     }
 
     internal bool BringBack(nint source)
     {
-        if (!TryPosition(source))
+        if (!TryPosition(source, WindowHeight))
         {
             return false;
         }
@@ -125,9 +158,9 @@ internal sealed class CaptureWindow : Window
         return true;
     }
 
-    private bool TryPosition(nint source)
+    private bool TryPosition(nint source, int height)
     {
-        if (!SurfaceWindow.TryPlace(this, source, windowWidth, windowHeight, out _))
+        if (!SurfaceWindow.TryPlace(this, source, windowWidth, height, out _))
         {
             return false;
         }
@@ -139,24 +172,44 @@ internal sealed class CaptureWindow : Window
     private void ShowInput()
     {
         SurfaceWindow.ShowCapture(this);
-        input.Focus(FocusState.Programmatic);
+        FocusDraftField();
+    }
+
+    private void ExpandNextStep()
+    {
+        nextStep.Visibility = Visibility.Visible;
+        addNextStep.Visibility = Visibility.Collapsed;
+        if (placed && AppWindow.IsVisible)
+        {
+            TryPosition(sourceWindow, WindowHeight);
+        }
+        editingField = nextStep;
+        FocusDraftField();
+    }
+
+    private void FocusDraftField()
+    {
+        var field = editingField;
+        var start = field.SelectionStart;
+        var length = field.SelectionLength;
+        if (field.Focus(FocusState.Programmatic) && (field.SelectionStart != start || field.SelectionLength != length))
+        {
+            field.Select(start, length);
+        }
     }
 
     internal void ApplyAppearance(AppearanceState state)
     {
         SurfaceStyle.ApplyContrast(title, state);
         SurfaceStyle.ApplyContrast(hint, state);
-        var width = state.ScaleWidth(460);
-        var height = state.ScaleHeight(165);
-        if (width == windowWidth && height == windowHeight)
+        var previousWidth = windowWidth;
+        var previousHeight = WindowHeight;
+        windowWidth = state.ScaleWidth(460);
+        compactHeight = state.ScaleHeight(CompactHeight);
+        expandedHeight = state.ScaleHeight(ExpandedHeight);
+        if (placed && AppWindow.IsVisible && (previousWidth != windowWidth || previousHeight != WindowHeight))
         {
-            return;
-        }
-        windowWidth = width;
-        windowHeight = height;
-        if (placed && AppWindow.IsVisible)
-        {
-            SurfaceWindow.TryPlace(this, sourceWindow, windowWidth, windowHeight, out _);
+            TryPosition(sourceWindow, WindowHeight);
         }
     }
 
@@ -166,14 +219,15 @@ internal sealed class CaptureWindow : Window
         if (value.Length == 0)
         {
             hint.Text = "Enter a task title.";
-            input.Focus(FocusState.Programmatic);
+            editingField = input;
+            FocusDraftField();
             return;
         }
 
-        if (!save(value))
+        if (!save(value, nextStep.Text))
         {
             hint.Text = "Couldn’t save. Try again.";
-            input.Focus(FocusState.Programmatic);
+            FocusDraftField();
         }
     }
 }

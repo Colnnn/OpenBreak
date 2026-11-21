@@ -99,18 +99,21 @@ namespace Afterbreak
 
     internal sealed class CaptureWindow : TestSurface
     {
-        public CaptureWindow(Func<string, bool> save, Action cancel)
+        private readonly Func<string, string?, bool> save;
+
+        public CaptureWindow(Func<string, string?, bool> save, Action cancel)
         {
-            Save = save;
+            this.save = save;
             Cancel = cancel;
             Current = this;
         }
 
         public static CaptureWindow Current { get; private set; } = null!;
-        public Func<string, bool> Save { get; }
+        public bool Save(string title, string? note = null) => save(title, note);
         public Action Cancel { get; }
         public int Shows { get; private set; }
         public string Input { get; set; } = "";
+        public string NextStep { get; set; } = "";
         public bool CanPlace { get; set; } = true;
 
         public bool TryShow(nint source)
@@ -121,6 +124,7 @@ namespace Afterbreak
             }
             Shows++;
             Input = "";
+            NextStep = "";
             IsVisible = true;
             return true;
         }

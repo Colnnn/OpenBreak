@@ -345,13 +345,18 @@ internal sealed partial class AfterbreakSession
         }
     }
 
-    private bool SaveTask(string text)
+    private bool SaveTask(string title, string? nextStep)
     {
+        if (visible != Surface.Capture)
+        {
+            return false;
+        }
+
         try
         {
-            tasks.Add(text);
+            tasks.Add(title, nextStep);
         }
-        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        catch (Exception exception) when (TaskStore.IsStorageError(exception) || exception is ArgumentException)
         {
             return false;
         }

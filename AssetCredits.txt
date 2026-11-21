@@ -1,0 +1,19 @@
+Afterbreak asset credits
+
+Scenery
+Daylight and Dusk are two color variants of an original coastal scene
+drawn in code for Afterbreak. StillBackdrop.cs renders the scene using
+WinUI shapes and gradients.
+
+Windows resources
+The interface uses Windows system fonts, including Segoe UI Variable
+Display for the break timer. Afterbreak loads the shared Windows
+information icon from the operating system for its notification icon.
+
+Bundled components
+The ThirdParty folder contains license and notice files for the .NET
+runtime and Windows App SDK, including WinUI. It also contains notices
+for the bundled WebView2 components, Windows AI Machine Learning,
+Microsoft.Data.Sqlite, and SQLitePCLRaw. The SQLitePCLRaw notices identify
+the bundled SQLite engine. See dependencies.lock.json for NuGet
+dependency versions.

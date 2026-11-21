@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.7.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
     <Compile Remove="tests\**\*.cs" />
+    <None Update="AssetCredits.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="IncludeAfterbreakXamlInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>

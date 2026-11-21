@@ -28,11 +28,7 @@ internal sealed class CaptureWindow : Window
             MaxLength = 140,
         };
         AutomationProperties.SetName(input, "Task title");
-        hint = SurfaceStyle.Label("Enter to save · Esc to cancel", 12);
-        if (SurfaceStyle.ThemeBrush("TextFillColorSecondaryBrush") is { } secondary)
-        {
-            hint.Foreground = secondary;
-        }
+        hint = SurfaceStyle.SecondaryLabel("Enter to save · Esc to cancel", 12);
 
         var saveButton = new Button
         {
@@ -124,11 +120,7 @@ internal sealed class WarningWindow : Window
     {
         Title = "Afterbreak · Preview warning";
         title = SurfaceStyle.Label("", 20, FontWeights.SemiBold);
-        var detail = SurfaceStyle.Label("Your 10-second preview is about to begin.", 13);
-        if (SurfaceStyle.ThemeBrush("TextFillColorSecondaryBrush") is { } secondary)
-        {
-            detail.Foreground = secondary;
-        }
+        var detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", 13);
         var text = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(title);
         text.Children.Add(detail);
@@ -288,15 +280,16 @@ internal static class SurfaceStyle
     internal static SolidColorBrush Brush(uint rgb, byte opacity = 255) =>
         new(Color.FromArgb(opacity, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb));
 
-    internal static Brush? ThemeBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out var value) ? value as Brush : null;
+    internal static TextBlock SecondaryLabel(string text, double size)
+    {
+        var label = Label(text, size);
+        label.Style = (Style)Application.Current.Resources["AfterbreakSecondaryLabelStyle"];
+        return label;
+    }
 
     internal static Border Frame(UIElement child) => new()
     {
-        Background = ThemeBrush("ApplicationPageBackgroundThemeBrush") ??
-            new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Background)),
-        BorderBrush = ThemeBrush("ControlStrokeColorDefaultBrush") ?? Brush(0x728D89),
-        BorderThickness = new Thickness(1),
+        Style = (Style)Application.Current.Resources["AfterbreakSurfaceFrameStyle"],
         Child = child,
     };
 }

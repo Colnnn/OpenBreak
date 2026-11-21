@@ -26,11 +26,12 @@ internal sealed partial class AfterbreakSession
     private nint returnWindow;
     private BoardWindow.CardFocus? captureCardFocus;
 
-    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null, TimeProvider? reminderClock = null)
+    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
+        TimeProvider? reminderClock = null, bool captureMotionStudy = false)
     {
         this.exit = exit;
         this.tasks = tasks ?? TaskStore.ForCurrentUser();
-        capture = new CaptureWindow(SaveTask, Dismiss);
+        capture = new CaptureWindow(SaveTask, Dismiss, captureMotionStudy);
         warning = new WarningWindow(SnoozeReminder, SkipReminder);
         preview = new BreakWindow(EndVisibleBreak);
         timer = dispatcher.CreateTimer();
@@ -157,6 +158,7 @@ internal sealed partial class AfterbreakSession
                 }
                 visible = Surface.Capture;
                 desktop.PreviewAvailable = false;
+                capture.StartCaptureEntrance();
                 break;
             case TrayCommand.Preview:
             case TrayCommand.PreviewSampleBoard:
@@ -381,6 +383,7 @@ internal sealed partial class AfterbreakSession
         switch (closing)
         {
             case Surface.Capture:
+                capture.StopCaptureEntrance();
                 SurfaceWindow.HideAndReturn(capture, returnWindow);
                 break;
             case Surface.Warning:

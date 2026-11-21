@@ -17,6 +17,7 @@ internal readonly record struct AppearanceState(AppearanceTheme Theme, BreakScen
     bool UseMaterials, bool AnimateScene, double TextScale, uint WindowColor, uint TextColor)
 {
     internal bool ShowScene => !HighContrast;
+    internal bool AllowsCaptureMotion(bool studyEnabled) => studyEnabled && AnimateScene && !HighContrast;
     internal int ScaleWidth(int width) => Expand(width, 160);
     internal int ScaleHeight(int height) => Expand(height, 215);
 

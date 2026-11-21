@@ -6,7 +6,7 @@ namespace Afterbreak;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         using var instance = new Mutex(true, @"Local\Afterbreak.NativeStudy", out var firstInstance);
         if (!firstInstance)
@@ -14,27 +14,30 @@ internal static class Program
             return;
         }
 
+        var captureMotionStudy = args.Contains("--capture-motion-study", StringComparer.Ordinal);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(initialization =>
         {
             var dispatcher = DispatcherQueue.GetForCurrentThread();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(dispatcher));
-            new AfterbreakApp();
+            new AfterbreakApp(captureMotionStudy);
         });
     }
 }
 
 public sealed partial class AfterbreakApp : Application
 {
+    private readonly bool captureMotionStudy;
     private AfterbreakSession? session;
 
-    internal AfterbreakApp()
+    internal AfterbreakApp(bool captureMotionStudy = false)
     {
+        this.captureMotionStudy = captureMotionStudy;
         InitializeComponent();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        session = new AfterbreakSession(DispatcherQueue.GetForCurrentThread(), Exit);
+        session = new AfterbreakSession(DispatcherQueue.GetForCurrentThread(), Exit, captureMotionStudy: captureMotionStudy);
     }
 }

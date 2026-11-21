@@ -13,6 +13,7 @@ internal static class Program
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
+            CheckCaptureMotionStudy(Path.Combine(temporary.FullName, "motion-study.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
             CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
@@ -24,6 +25,58 @@ internal static class Program
         {
             temporary.Delete(recursive: true);
         }
+    }
+
+    private static void CheckCaptureMotionStudy(string path)
+    {
+        var store = new TaskStore(path);
+        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store);
+        Desktop.Current.Send(TrayCommand.Capture);
+        Check(CaptureWindow.Current.IsVisible && CaptureWindow.Current.EntranceStarts == 0,
+            "normal capture remains immediately available without a study entrance");
+        Desktop.Current.Send(TrayCommand.Quit);
+
+        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store, captureMotionStudy: true);
+        var tray = Desktop.Current;
+        var capture = CaptureWindow.Current;
+        capture.CanPlace = false;
+        tray.Send(TrayCommand.Capture);
+        Check(!capture.IsVisible && capture.EntranceStarts == 0, "failed placement never requests a hidden capture entrance");
+
+        capture.CanPlace = true;
+        capture.FocusReady = false;
+        tray.Send(TrayCommand.Capture);
+        Check(capture.IsVisible && capture.EntranceStarts == 0, "an unready editing field skips the study entrance");
+        capture.Cancel();
+
+        capture.FocusReady = true;
+        tray.Send(TrayCommand.Capture);
+        Check(capture.IsVisible && capture.EntranceStarts == 1 && capture.EntranceRunning,
+            "opt-in requests one entrance after fresh capture is shown");
+        capture.Input = "Keep the title";
+        capture.NextStep = "Keep the next step";
+        capture.CanPlace = false;
+        tray.Send(TrayCommand.Capture);
+        capture.CanPlace = true;
+        tray.Send(TrayCommand.Capture);
+        Check(!capture.EntranceRunning && capture.EntranceStarts == 1 && capture.Input == "Keep the title" &&
+            capture.NextStep == "Keep the next step", "failed and successful capture reentry keep both fields without a second entrance");
+        capture.Cancel();
+
+        tray.Send(TrayCommand.Capture);
+        capture.Cancel();
+        Check(!capture.IsVisible && !capture.EntranceRunning && capture.EntranceStarts == 2 &&
+            capture.EntranceStoppedWhileVisible, "cancel stops study motion before hiding capture");
+
+        tray.Send(TrayCommand.Capture);
+        Check(capture.Save("Save during entrance", "A preserved note") && !capture.EntranceRunning &&
+            capture.EntranceStarts == 3 && store.List(archived: false).Single().NextStep == "A preserved note",
+            "capture can save a complete task while the study entrance is running");
+
+        tray.Send(TrayCommand.Capture);
+        tray.Send(TrayCommand.Quit);
+        Check(capture.Closed && !capture.EntranceRunning && capture.EntranceStarts == 4,
+            "quit stops an active capture entrance");
     }
 
     private static void CheckSession(string path)

@@ -101,9 +101,10 @@ namespace Afterbreak
     {
         private readonly Func<string, string?, bool> save;
 
-        public CaptureWindow(Func<string, string?, bool> save, Action cancel)
+        public CaptureWindow(Func<string, string?, bool> save, Action cancel, bool captureMotionStudy = false)
         {
             this.save = save;
+            CaptureMotionStudy = captureMotionStudy;
             Cancel = cancel;
             Current = this;
         }
@@ -115,6 +116,11 @@ namespace Afterbreak
         public string Input { get; set; } = "";
         public string NextStep { get; set; } = "";
         public bool CanPlace { get; set; } = true;
+        public bool CaptureMotionStudy { get; }
+        public bool FocusReady { get; set; } = true;
+        public int EntranceStarts { get; private set; }
+        public bool EntranceRunning { get; private set; }
+        public bool EntranceStoppedWhileVisible { get; private set; }
 
         public bool TryShow(nint source)
         {
@@ -129,7 +135,33 @@ namespace Afterbreak
             return true;
         }
 
-        public bool BringBack(nint source) => CanPlace;
+        public bool BringBack(nint source)
+        {
+            StopCaptureEntrance();
+            return CanPlace;
+        }
+
+        public void StartCaptureEntrance()
+        {
+            if (!IsVisible)
+            {
+                throw new InvalidOperationException("Capture must be shown before its entrance starts.");
+            }
+            if (CaptureMotionStudy && FocusReady)
+            {
+                EntranceStarts++;
+                EntranceRunning = true;
+            }
+        }
+
+        public void StopCaptureEntrance()
+        {
+            if (EntranceRunning)
+            {
+                EntranceStoppedWhileVisible = IsVisible;
+            }
+            EntranceRunning = false;
+        }
     }
 
     internal sealed class WarningWindow : TestSurface

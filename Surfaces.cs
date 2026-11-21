@@ -23,8 +23,12 @@ internal sealed class CaptureWindow : Window
     private readonly Button addNextStep;
     private readonly TextBlock title;
     private readonly TextBlock hint;
+    private readonly StackPanel body;
     private readonly Func<string, string?, bool> save;
+    private readonly bool captureMotionStudy;
     private TextBox editingField;
+    private Storyboard? captureEntrance;
+    private bool captureMotionAllowed;
     private nint sourceWindow;
     private bool placed;
     private int windowWidth = 460;
@@ -32,9 +36,10 @@ internal sealed class CaptureWindow : Window
     private int expandedHeight = ExpandedHeight;
     private int WindowHeight => nextStep.Visibility == Visibility.Visible ? expandedHeight : compactHeight;
 
-    internal CaptureWindow(Func<string, string?, bool> save, Action cancel)
+    internal CaptureWindow(Func<string, string?, bool> save, Action cancel, bool captureMotionStudy = false)
     {
         this.save = save;
+        this.captureMotionStudy = captureMotionStudy;
         Title = "Afterbreak · Capture task";
         title = SurfaceStyle.Label("Capture a task", 23, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
@@ -95,7 +100,7 @@ internal sealed class CaptureWindow : Window
             footer.RowSpacing = stack ? 8 : 0;
         };
 
-        var body = new StackPanel { Spacing = 12, Margin = new Thickness(20, 17, 20, 17) };
+        body = new StackPanel { Spacing = 12, Margin = new Thickness(20, 17, 20, 17) };
         body.Children.Add(title);
         body.Children.Add(input);
         body.Children.Add(nextStep);
@@ -134,6 +139,7 @@ internal sealed class CaptureWindow : Window
 
     internal bool TryShow(nint source)
     {
+        StopCaptureEntrance();
         if (!TryPosition(source, compactHeight))
         {
             return false;
@@ -150,6 +156,7 @@ internal sealed class CaptureWindow : Window
 
     internal bool BringBack(nint source)
     {
+        StopCaptureEntrance();
         if (!TryPosition(source, WindowHeight))
         {
             return false;
@@ -200,6 +207,11 @@ internal sealed class CaptureWindow : Window
 
     internal void ApplyAppearance(AppearanceState state)
     {
+        captureMotionAllowed = state.AllowsCaptureMotion(captureMotionStudy);
+        if (!captureMotionAllowed)
+        {
+            StopCaptureEntrance();
+        }
         SurfaceStyle.ApplyContrast(title, state);
         SurfaceStyle.ApplyContrast(hint, state);
         var previousWidth = windowWidth;
@@ -213,8 +225,39 @@ internal sealed class CaptureWindow : Window
         }
     }
 
+    internal void StartCaptureEntrance()
+    {
+        if (!captureMotionAllowed || !AppWindow.IsVisible ||
+            body.XamlRoot is null || editingField.FocusState == FocusState.Unfocused)
+        {
+            return;
+        }
+
+        captureEntrance ??= CreateCaptureEntrance();
+        captureEntrance.Begin();
+    }
+
+    internal void StopCaptureEntrance() => captureEntrance?.Stop();
+
+    private Storyboard CreateCaptureEntrance()
+    {
+        body.RenderTransform = new TranslateTransform();
+        var duration = new Duration(TimeSpan.FromMilliseconds(140));
+        var fade = new DoubleAnimation { From = 0.8, To = 1, Duration = duration };
+        Storyboard.SetTarget(fade, body);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var travel = new DoubleAnimation { From = 4, To = 0, Duration = duration };
+        Storyboard.SetTarget(travel, body);
+        Storyboard.SetTargetProperty(travel, "(UIElement.RenderTransform).(TranslateTransform.Y)");
+        var storyboard = new Storyboard { FillBehavior = FillBehavior.Stop };
+        storyboard.Children.Add(fade);
+        storyboard.Children.Add(travel);
+        return storyboard;
+    }
+
     private void Save()
     {
+        StopCaptureEntrance();
         var value = input.Text.Trim();
         if (value.Length == 0)
         {

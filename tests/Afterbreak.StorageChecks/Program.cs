@@ -310,10 +310,13 @@ internal static class Program
         Require(state.Theme == AppearanceTheme.System && state.Scene == BreakScene.Dusk && state.ShowScene &&
             state.UseMaterials && state.AnimateScene && state.ScaleWidth(460) == 460 && state.ScaleHeight(165) == 165,
             "default follows Windows and shows the dusk scene with allowed effects");
+        Require(!state.AllowsCaptureMotion(studyEnabled: false) && state.AllowsCaptureMotion(studyEnabled: true),
+            "capture animation requires explicit study opt-in even when Windows allows animation");
         var choices = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
         state = AppearancePolicy.Resolve(choices, system with { Animations = false, TextScale = 2 });
         Require(state.Theme == AppearanceTheme.Dark && state.Scene == BreakScene.Daylight && !state.AnimateScene && state.UseMaterials &&
             state.ScaleWidth(460) == 620 && state.ScaleHeight(165) == 380, "reduced motion and text scale do not override the scene or material");
+        Require(!state.AllowsCaptureMotion(studyEnabled: true), "reduced motion overrides the capture study flag");
 
         state = AppearancePolicy.Resolve(choices, system with { Transparency = false });
         Require(!state.UseMaterials && state.ShowScene && state.AnimateScene, "transparency off leaves an opaque still scene with separately allowed entrance motion");
@@ -322,6 +325,7 @@ internal static class Program
             state = AppearancePolicy.Resolve(choices, system with { HighContrast = true, WindowColor = palette.Window, TextColor = palette.Text });
             Require(state.Theme == AppearanceTheme.System && !state.ShowScene && !state.AnimateScene && !state.UseMaterials &&
                 state.WindowColor == palette.Window && state.TextColor == palette.Text, "contrast overrides app theme and uses either supplied system palette");
+            Require(!state.AllowsCaptureMotion(studyEnabled: true), "high contrast overrides the capture study flag");
         }
         state = AppearancePolicy.Resolve(choices, system with { TextScale = double.NaN });
         Require(state.TextScale == 1, "an unavailable scale uses normal dimensions");

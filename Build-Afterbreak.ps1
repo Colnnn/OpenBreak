@@ -6,11 +6,15 @@ param(
     [string] $Configuration = 'Release',
     [string] $DotNetPath,
     [string] $OutputDirectory,
-    [switch] $AllowDirty
+    [switch] $AllowDirty,
+    [switch] $CaptureMotionStudy
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($CaptureMotionStudy -and $Action -ne 'Launch') {
+    throw '-CaptureMotionStudy is only available with -Action Launch.'
+}
 $repository = $PSScriptRoot
 $config = Join-Path $repository 'NuGet.Config'
 $project = Join-Path $repository 'Afterbreak.csproj'
@@ -221,7 +225,9 @@ try {
             if ($Action -eq 'Launch') {
                 $assembly = Invoke-Checked $sdk @('msbuild', $project, "-p:Configuration=$Configuration", '-getProperty:TargetPath')
                 $application = [IO.Path]::ChangeExtension($assembly, '.exe')
-                Start-Process -FilePath $application -WorkingDirectory (Split-Path -Parent $application)
+                $launch = @{ FilePath = $application; WorkingDirectory = (Split-Path -Parent $application) }
+                if ($CaptureMotionStudy) { $launch.ArgumentList = '--capture-motion-study' }
+                Start-Process @launch
             }
         }
     }

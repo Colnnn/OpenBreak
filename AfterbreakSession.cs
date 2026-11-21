@@ -82,6 +82,9 @@ internal sealed class AfterbreakSession
             case TrayCommand.Quit:
                 Dismiss();
                 desktop.Dispose();
+                capture.Close();
+                warning.Close();
+                preview.Close();
                 exit();
                 break;
         }

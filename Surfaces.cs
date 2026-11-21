@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
@@ -152,11 +153,19 @@ internal sealed class WarningWindow : Window
     }
 }
 
+internal enum BreakLayout
+{
+    Compact,
+    SampleBoard,
+}
+
 internal sealed class BreakWindow : Window
 {
     private readonly TextBlock clock;
     private readonly TextBlock taskTitle;
     private readonly Border taskCard;
+    private readonly ScrollViewer sampleBoard;
+    private readonly Grid body;
     private readonly Button end;
 
     internal BreakWindow(Action dismiss)
@@ -193,6 +202,20 @@ internal sealed class BreakWindow : Window
             Child = taskBody,
         };
 
+        sampleBoard = new ScrollViewer
+        {
+            Content = CreateSampleBoard(foreground),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            IsTabStop = true,
+            Margin = new Thickness(0, 19, 0, 0),
+            Visibility = Visibility.Collapsed,
+        };
+        AutomationProperties.SetName(sampleBoard, "Sample board");
+
         end = new Button
         {
             Content = "End break",
@@ -201,19 +224,29 @@ internal sealed class BreakWindow : Window
             Padding = new Thickness(17, 7, 17, 7),
         };
         end.Click += (_, _) => dismiss();
-        var body = new StackPanel
+        var heading = new StackPanel { Spacing = 4 };
+        heading.Children.Add(clock);
+        heading.Children.Add(title);
+
+        body = new Grid
         {
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
             MaxWidth = 410,
             MinWidth = 250,
             Margin = new Thickness(20),
-            Spacing = 4,
+            RowSpacing = 4,
             RequestedTheme = ElementTheme.Dark,
         };
-        body.Children.Add(clock);
-        body.Children.Add(title);
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.Children.Add(heading);
+        Grid.SetRow(taskCard, 1);
         body.Children.Add(taskCard);
+        Grid.SetRow(sampleBoard, 1);
+        body.Children.Add(sampleBoard);
+        Grid.SetRow(end, 2);
         body.Children.Add(end);
 
         var root = new Grid();
@@ -244,11 +277,25 @@ internal sealed class BreakWindow : Window
         };
     }
 
-    internal void Show(nint source, string? task)
+    internal void SetPreview(BreakLayout layout, string? task)
     {
         Update(10);
-        taskTitle.Text = task ?? "";
-        taskCard.Visibility = task is null ? Visibility.Collapsed : Visibility.Visible;
+        var showBoard = layout == BreakLayout.SampleBoard;
+        taskTitle.Text = showBoard ? "" : task ?? "";
+        taskCard.Visibility = showBoard || task is null ? Visibility.Collapsed : Visibility.Visible;
+        sampleBoard.Visibility = showBoard ? Visibility.Visible : Visibility.Collapsed;
+        if (showBoard)
+        {
+            sampleBoard.ChangeView(null, 0, null, disableAnimation: true);
+        }
+        body.HorizontalAlignment = showBoard ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+        body.MaxWidth = showBoard ? 720 : 410;
+        body.MinWidth = showBoard ? 0 : 250;
+    }
+
+    internal void Show(nint source, BreakLayout layout, string? task)
+    {
+        SetPreview(layout, task);
         SurfaceWindow.PlaceBreak(this, source);
         Activate();
         if (!AppWindow.IsVisible)
@@ -265,6 +312,109 @@ internal sealed class BreakWindow : Window
         {
             clock.Text = value;
         }
+    }
+
+    private static Border CreateSampleBoard(Brush foreground)
+    {
+        var heading = SurfaceStyle.Label("Sample board", 18, FontWeights.SemiBold);
+        heading.Foreground = foreground;
+        heading.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level1);
+
+        var lanes = new[]
+        {
+            CreateLane("To do", 0x97C0EE, foreground, "Draft the handover note", "Schedule the design review"),
+            CreateLane("In progress", 0xF2B462, foreground, "Check the quotation totals"),
+            CreateLane("Done", 0x9ACBA7, foreground, "Send the drawings"),
+        };
+        var columns = new Grid { ColumnSpacing = 10 };
+        foreach (var lane in lanes)
+        {
+            Grid.SetColumn(lane, columns.Children.Count);
+            columns.ColumnDefinitions.Add(new ColumnDefinition());
+            columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            columns.Children.Add(lane);
+        }
+
+        var board = new StackPanel { Spacing = 12 };
+        board.Children.Add(heading);
+        board.Children.Add(columns);
+
+        var stacked = false;
+        columns.SizeChanged += (_, args) =>
+        {
+            var useStack = args.NewSize.Width < 460;
+            if (useStack == stacked)
+            {
+                return;
+            }
+
+            stacked = useStack;
+            columns.ColumnSpacing = stacked ? 0 : 10;
+            columns.RowSpacing = stacked ? 10 : 0;
+            for (var index = 0; index < lanes.Length; index++)
+            {
+                var lane = lanes[index];
+                Grid.SetColumn(lane, stacked ? 0 : index);
+                Grid.SetColumnSpan(lane, stacked ? lanes.Length : 1);
+                Grid.SetRow(lane, stacked ? index : 0);
+            }
+        };
+
+        return new Border
+        {
+            Background = SurfaceStyle.Brush(0x182E34, 240),
+            BorderBrush = SurfaceStyle.Brush(0xABC6BB, 100),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(15),
+            Child = board,
+        };
+    }
+
+    private static Border CreateLane(string name, uint statusColor, Brush foreground, params string[] samples)
+    {
+        var label = SurfaceStyle.Label(name, 15, FontWeights.SemiBold);
+        label.Foreground = foreground;
+        label.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(label, AutomationHeadingLevel.Level2);
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition());
+        header.Children.Add(new Border
+        {
+            Background = SurfaceStyle.Brush(statusColor),
+            Width = 7,
+            Height = 7,
+            CornerRadius = new CornerRadius(4),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        Grid.SetColumn(label, 1);
+        header.Children.Add(label);
+
+        var lane = new StackPanel { Spacing = 8 };
+        lane.Children.Add(header);
+        foreach (var sample in samples)
+        {
+            var task = SurfaceStyle.Label(sample, 15);
+            task.Foreground = foreground;
+            task.TextWrapping = TextWrapping.Wrap;
+            lane.Children.Add(new Border
+            {
+                Background = SurfaceStyle.Brush(0xE4F0EB, 22),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(10, 8, 10, 8),
+                Child = task,
+            });
+        }
+
+        return new Border
+        {
+            Background = SurfaceStyle.Brush(0xE4F0EB, 12),
+            CornerRadius = new CornerRadius(7),
+            Padding = new Thickness(10),
+            Child = lane,
+        };
     }
 }
 

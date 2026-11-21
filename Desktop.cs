@@ -9,6 +9,7 @@ internal enum TrayCommand
     Preview,
     EndBreak,
     Quit,
+    PreviewSampleBoard,
 }
 
 internal readonly record struct DesktopArea(int Left, int Top, int Right, int Bottom, double Scale);
@@ -195,6 +196,7 @@ internal sealed class Desktop : IDisposable
         {
             AppendMenu(menu, 0, (nuint)TrayCommand.Capture, ShortcutAvailable ? "Capture task\tCtrl+Alt+K" : "Capture task");
             AppendMenu(menu, 0, (nuint)TrayCommand.Preview, "Preview a break");
+            AppendMenu(menu, 0, (nuint)TrayCommand.PreviewSampleBoard, "Preview sample board");
             if (DismissLabel is { } dismissLabel)
             {
                 AppendMenu(menu, 0, (nuint)TrayCommand.EndBreak, dismissLabel);

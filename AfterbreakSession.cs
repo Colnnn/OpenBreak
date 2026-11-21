@@ -14,6 +14,7 @@ internal sealed class AfterbreakSession
     private readonly DispatcherQueueTimer timer;
     private readonly Action exit;
     private Surface visible;
+    private BreakLayout previewLayout;
     private long startedAt;
     private nint returnWindow;
     private string? task;
@@ -61,12 +62,14 @@ internal sealed class AfterbreakSession
                 capture.Show(source);
                 break;
             case TrayCommand.Preview:
+            case TrayCommand.PreviewSampleBoard:
                 if (visible is Surface.Warning or Surface.Preview)
                 {
                     return;
                 }
 
                 Dismiss();
+                previewLayout = command == TrayCommand.Preview ? BreakLayout.Compact : BreakLayout.SampleBoard;
                 returnWindow = source;
                 visible = Surface.Warning;
                 desktop.DismissLabel = "Cancel preview";
@@ -120,7 +123,7 @@ internal sealed class AfterbreakSession
             returnWindow = desktop.WorkWindow();
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
-            preview.Show(returnWindow, task);
+            preview.Show(returnWindow, previewLayout, previewLayout == BreakLayout.Compact ? task : null);
             StartClock();
         }
         else if (visible == Surface.Preview)

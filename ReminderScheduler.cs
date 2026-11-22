@@ -1,13 +1,15 @@
 namespace Afterbreak;
 
+internal enum BreakDisplay { SavedTaskBoard = 0, OneTask = 1, TimerOnly = 2 }
+
 internal sealed record ReminderSettings(bool Enabled, int WorkSeconds, int ShortSeconds, int LongSeconds,
-    bool WorkingHours, int StartMinute, int EndMinute, bool TimerOnly)
+    bool WorkingHours, int StartMinute, int EndMinute, BreakDisplay BreakDisplay)
 {
-    internal static ReminderSettings Default { get; } = new(false, 1800, 30, 300, false, 9 * 60, 17 * 60, false);
+    internal static ReminderSettings Default { get; } = new(false, 1800, 30, 300, false, 9 * 60, 17 * 60, BreakDisplay.SavedTaskBoard);
 
     internal bool IsValid => WorkSeconds is >= 5 and <= 86400 && ShortSeconds is >= 1 and <= 3600 &&
         LongSeconds is >= 1 and <= 3600 && StartMinute is >= 0 and < 1440 && EndMinute is >= 0 and < 1440 &&
-        (!WorkingHours || StartMinute != EndMinute);
+        (!WorkingHours || StartMinute != EndMinute) && Enum.IsDefined(BreakDisplay);
 
     internal TimeSpan WorkLength => TimeSpan.FromSeconds(WorkSeconds);
     internal TimeSpan BreakLength(int completedShorts) => TimeSpan.FromSeconds(completedShorts == 3 ? LongSeconds : ShortSeconds);
@@ -201,7 +203,7 @@ internal sealed class ReminderScheduler
     {
         var old = Settings;
         Settings = settings;
-        if (old with { TimerOnly = settings.TimerOnly } == settings)
+        if (old with { BreakDisplay = settings.BreakDisplay } == settings)
         {
             return;
         }

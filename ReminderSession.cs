@@ -137,7 +137,10 @@ internal sealed partial class AfterbreakSession
                 Dismiss();
             }
 
-            var task = intended == Surface.Preview && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
+            if (intended == Surface.Preview)
+            {
+                preview.SetPreview(ReadBreakView(), reminders.IsLongBreak);
+            }
             var systemPause = desktop.GetSystemPause(checkPresentation: true);
             // The original warning's display can disappear during checkpoint I/O or task lookup.
             if (intended == Surface.Preview && wasShowingWarning && !warning.PlacementIsCurrent)
@@ -158,7 +161,7 @@ internal sealed partial class AfterbreakSession
             var source = desktop.WorkWindow();
             var shown = intended == Surface.Warning
                 ? warning.TryShow(source, reminders.IsLongBreak ? "Long break" : "Short break")
-                : preview.TryShow(source, BreakLayout.Compact, task?.Title, task?.NextStep, reminders.IsLongBreak);
+                : preview.TryShow(source);
             if (!shown)
             {
                 SkipForDisplayLoss();
@@ -274,6 +277,11 @@ internal sealed partial class AfterbreakSession
 
     private bool SaveSettings(ReminderSettings settings)
     {
+        if (reminderLoadError || !settings.IsValid)
+        {
+            return false;
+        }
+
         var candidate = reminders.WithSettings(settings);
         if (!TryPersist(settings, candidate.Checkpoint()))
         {

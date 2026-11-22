@@ -13,6 +13,7 @@ internal static class Program
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
+            BreakDisplayChecks.Run(temporary.FullName);
             CheckTrayMenuPolicy();
             CheckCaptureMotionStudy(Path.Combine(temporary.FullName, "motion-study.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));
@@ -116,6 +117,8 @@ internal static class Program
     private static void CheckSession(string path)
     {
         var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { BreakDisplay = BreakDisplay.OneTask };
+        store.SaveReminders(settings, new ReminderScheduler(TimeProvider.System, settings).Checkpoint());
         store.Add("Original return task");
         var first = store.List(archived: false).Single();
         store.Move(first.Id, TaskStatus.InProgress);
@@ -215,7 +218,8 @@ internal static class Program
             store.Move(task.Id, TaskStatus.Done);
         }
         Preview();
-        Check(BreakWindow.Text is null, "Done-only board shows timer-only break");
+        Check(BreakWindow.Layout == BreakLayout.TimerOnly && BreakWindow.Text is null,
+            "Done-only tasks show the timer in One task mode");
         tray.Send(TrayCommand.EndBreak);
 
         tray.Send(TrayCommand.Preview);
@@ -296,7 +300,7 @@ internal static class Program
         var tray = Desktop.Current;
         var capture = CaptureWindow.Current;
         var schedulerTimer = queue.Timers[1];
-        var enabled = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, TimerOnly = true };
+        var enabled = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, BreakDisplay = BreakDisplay.TimerOnly };
 
         void TickSeconds(int seconds)
         {
@@ -357,7 +361,8 @@ internal static class Program
         tray.ChangeEligibility();
         Check(WarningWindow.Seconds == 10, "eligibility recovery starts a new warning");
         TickSeconds(10);
-        Check(BreakWindow.Shows == breaks + 1 && BreakWindow.Text is null, "scheduled timer-only break omits the saved task");
+        Check(BreakWindow.Shows == breaks + 1 && BreakWindow.Layout == BreakLayout.TimerOnly && BreakWindow.Text is null,
+            "scheduled timer-only break omits the saved task");
         tray.Send(TrayCommand.EndBreak);
         Check(store.LoadReminders().Checkpoint?.CompletedShorts == 0, "ending a scheduled break early advances no cadence");
 
@@ -371,7 +376,7 @@ internal static class Program
     private static void CheckFailedStartupRead(string path)
     {
         var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
-        var original = ReminderSettings.Default with { Enabled = true, WorkSeconds = 64, TimerOnly = true };
+        var original = ReminderSettings.Default with { Enabled = true, WorkSeconds = 64, BreakDisplay = BreakDisplay.TimerOnly };
         var store = new TaskStore(path);
         store.SaveReminders(original, new ReminderScheduler(clock, original).Checkpoint());
         var savedAppearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);

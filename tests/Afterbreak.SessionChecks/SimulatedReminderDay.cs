@@ -16,7 +16,7 @@ internal sealed class SimulatedReminderDay(string path)
         var initialCards = store.List(archived: false).ToArray();
         var archivedCards = store.List(archived: true).ToArray();
         var returnTask = initialCards.First(task => task.Status == TaskStatus.InProgress);
-        var settings = ReminderSettings.Default with { Enabled = true, WorkingHours = true };
+        var settings = ReminderSettings.Default with { Enabled = true, WorkingHours = true, BreakDisplay = BreakDisplay.OneTask };
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var openingCounts = ShowCount();
         StartSession();

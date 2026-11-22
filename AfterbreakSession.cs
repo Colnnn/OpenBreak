@@ -21,7 +21,7 @@ internal sealed partial class AfterbreakSession
     private AppearancePreferences appearancePreferences = AppearancePreferences.Default;
     private bool appearanceLoadFailed;
     private Surface visible;
-    private BreakLayout previewLayout;
+    private bool samplePreview;
     private long startedAt;
     private nint returnWindow;
     private BoardWindow.CardFocus? captureCardFocus;
@@ -103,7 +103,7 @@ internal sealed partial class AfterbreakSession
                 captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status);
                 break;
             case TrayCommand.Settings:
-                DismissBreakForSettings();
+                DismissBreakForSettings(preserveSchedule: true);
                 if (reminderLoadError && reminderSettings?.AppWindow.IsVisible != true)
                 {
                     TryLoadReminderSettings();
@@ -178,7 +178,7 @@ internal sealed partial class AfterbreakSession
                 }
 
                 Dismiss();
-                previewLayout = command == TrayCommand.Preview ? BreakLayout.Compact : BreakLayout.SampleBoard;
+                samplePreview = command == TrayCommand.PreviewSampleBoard;
                 if (!warning.TryShow(source))
                 {
                     return;
@@ -326,14 +326,14 @@ internal sealed partial class AfterbreakSession
         if (visible == Surface.Warning)
         {
             warning.AppWindow.Hide();
-            var task = previewLayout == BreakLayout.Compact && !reminders.Settings.TimerOnly ? GetReturnTask() : null;
+            preview.SetPreview(ReadBreakView(samplePreview));
             if (!ManualPreviewAllowed(checkPresentation: true) || !warning.PlacementIsCurrent)
             {
                 Dismiss();
                 return;
             }
             var source = desktop.WorkWindow();
-            if (!preview.TryShow(source, previewLayout, task?.Title, task?.NextStep))
+            if (!preview.TryShow(source))
             {
                 Dismiss();
                 return;
@@ -349,16 +349,37 @@ internal sealed partial class AfterbreakSession
         }
     }
 
-    private BoardTask? GetReturnTask()
+    private BreakView ReadBreakView(bool sample = false)
     {
+        if (sample)
+        {
+            return new BreakView(BreakLayout.SampleBoard);
+        }
+
         try
         {
-            return tasks.ReturnTask();
+            switch (reminders.Settings.BreakDisplay)
+            {
+                case BreakDisplay.SavedTaskBoard:
+                    var saved = tasks.List(archived: false);
+                    if (saved.Count > 0)
+                    {
+                        return new BreakView(BreakLayout.SavedBoard, Tasks: saved);
+                    }
+                    break;
+                case BreakDisplay.OneTask:
+                    if (tasks.ReturnTask() is { } task)
+                    {
+                        return new BreakView(BreakLayout.Compact, Task: task);
+                    }
+                    break;
+            }
         }
         catch (Exception exception) when (TaskStore.IsStorageError(exception))
         {
-            return null;
+            // The timer can still run when saved task content is unavailable.
         }
+        return new BreakView(BreakLayout.TimerOnly);
     }
 
     private bool SaveTask(string title, string? nextStep)

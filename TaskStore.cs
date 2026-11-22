@@ -16,7 +16,7 @@ internal sealed partial class TaskStore(string path)
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -253,22 +253,26 @@ internal sealed partial class TaskStore(string path)
                 using var tasks = Command(connection, transaction,
                     "SELECT id, title, next_step, status, position, archived FROM tasks LIMIT 0");
                 using (tasks.ExecuteReader()) { }
-                if (version >= 2)
-                {
-                    using var reminders = Command(connection, transaction,
-                        "SELECT id, settings, checkpoint FROM reminder_state LIMIT 0");
-                    using (reminders.ExecuteReader()) { }
-                }
                 if (version >= 3)
                 {
                     using var capture = Command(connection, transaction,
                         "SELECT id, shortcut, guide_dismissed FROM capture_preferences LIMIT 0");
                     using (capture.ExecuteReader()) { }
                 }
+                if (version >= 4)
+                {
+                    using var appearance = Command(connection, transaction,
+                        "SELECT id, theme, scene FROM appearance_preferences LIMIT 0");
+                    using (appearance.ExecuteReader()) { }
+                }
+                if (version >= 2)
+                {
+                    MigrateReminderDisplay(connection, transaction);
+                }
                 using var migration = Command(connection, transaction, $"""
                     {(version == 1 ? ReminderTable : "")}
                     {(version <= 2 ? CaptureTable : "")}
-                    {AppearanceTable}
+                    {(version <= 3 ? AppearanceTable : "")}
                     PRAGMA user_version = {SchemaVersion};
                     """);
                 migration.ExecuteNonQuery();
@@ -359,9 +363,15 @@ internal sealed partial class TaskStore(string path)
         return string.IsNullOrEmpty(text) ? null : text;
     }
 
-    private static BoardTask ReadTask(SqliteDataReader reader) => new(
-        reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),
-        (TaskStatus)reader.GetInt32(3));
+    private static BoardTask ReadTask(SqliteDataReader reader)
+    {
+        var status = reader.GetInt64(3);
+        if (status is < (long)TaskStatus.ToDo or > (long)TaskStatus.Done)
+        {
+            throw new InvalidDataException("The saved task status is invalid.");
+        }
+        return new BoardTask(reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), (TaskStatus)status);
+    }
 
     private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string text,
         params (string Name, object Value)[] parameters)

@@ -368,12 +368,6 @@ internal sealed class WarningWindow : Window
     }
 }
 
-internal enum BreakLayout
-{
-    Compact,
-    SampleBoard,
-}
-
 internal sealed class BreakWindow : Window
 {
     private readonly TextBlock clock;
@@ -381,7 +375,8 @@ internal sealed class BreakWindow : Window
     private readonly TextBlock taskTitle;
     private readonly TextBlock taskNote;
     private readonly ScrollViewer compactTask;
-    private readonly ScrollViewer sampleBoard;
+    private readonly ScrollViewer boardView;
+    private readonly TextBlock boardHeading;
     private readonly Grid body;
     private readonly Button end;
     private readonly Grid root;
@@ -395,11 +390,12 @@ internal sealed class BreakWindow : Window
     private readonly SolidColorBrush cardBackground = SurfaceStyle.Brush(0xE4F0EB, 22);
     private readonly SolidColorBrush cardStroke = SurfaceStyle.Brush(0, 0);
     private readonly List<(SolidColorBrush Brush, uint Color)> markers = [];
-    private Grid sampleColumns = null!;
+    private readonly Dictionary<TaskStatus, StackPanel> boardCards = [];
+    private Grid boardColumns = null!;
     private Storyboard? sceneAnimation;
     private BreakScene scene;
     private double textScale = 1;
-    private bool stackSample;
+    private bool stackBoard;
     private bool animateScene;
     private SurfacePlacement placement;
 
@@ -441,9 +437,12 @@ internal sealed class BreakWindow : Window
         };
 
         compactTask = BreakContent(taskCard);
-        sampleBoard = BreakContent(CreateSampleBoard());
-        sampleBoard.Visibility = Visibility.Collapsed;
-        AutomationProperties.SetName(sampleBoard, "Sample board");
+        boardHeading = SurfaceStyle.Label("", 18, FontWeights.SemiBold);
+        boardHeading.Foreground = foreground;
+        boardHeading.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(boardHeading, AutomationHeadingLevel.Level1);
+        boardView = BreakContent(CreateBoard());
+        boardView.Visibility = Visibility.Collapsed;
 
         end = new Button
         {
@@ -462,7 +461,6 @@ internal sealed class BreakWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
             MaxWidth = 410,
-            MinWidth = 250,
             Margin = new Thickness(20),
             RowSpacing = 4,
         };
@@ -472,8 +470,8 @@ internal sealed class BreakWindow : Window
         body.Children.Add(heading);
         Grid.SetRow(compactTask, 1);
         body.Children.Add(compactTask);
-        Grid.SetRow(sampleBoard, 1);
-        body.Children.Add(sampleBoard);
+        Grid.SetRow(boardView, 1);
+        body.Children.Add(boardView);
         Grid.SetRow(end, 2);
         body.Children.Add(end);
 
@@ -506,16 +504,39 @@ internal sealed class BreakWindow : Window
         };
     }
 
-    internal void SetPreview(BreakLayout layout, string? task, string? nextStep = null)
+    internal void SetPreview(BreakView view, bool longBreak = false)
     {
         Update(10);
-        var showBoard = layout == BreakLayout.SampleBoard;
-        taskTitle.Text = showBoard ? "" : task ?? "";
-        taskNote.Text = showBoard || task is null ? "" : nextStep ?? "";
+        title.Text = longBreak ? "Time for a long break" : "Time for a short break";
+        var compact = view.Layout == BreakLayout.Compact ? view.Task : null;
+        taskTitle.Text = compact?.Title ?? "";
+        taskNote.Text = compact?.NextStep ?? "";
         taskNote.Visibility = taskNote.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        compactTask.Visibility = showBoard || task is null ? Visibility.Collapsed : Visibility.Visible;
-        sampleBoard.Visibility = showBoard ? Visibility.Visible : Visibility.Collapsed;
-        var content = showBoard ? sampleBoard : compactTask;
+        compactTask.Visibility = compact is null ? Visibility.Collapsed : Visibility.Visible;
+
+        foreach (var cards in boardCards.Values)
+        {
+            cards.Children.Clear();
+        }
+        var sample = view.Layout == BreakLayout.SampleBoard;
+        var saved = view.Layout == BreakLayout.SavedBoard && view.Tasks is { Count: > 0 };
+        if (sample)
+        {
+            PopulateSampleBoard();
+        }
+        else if (saved)
+        {
+            foreach (var card in view.Tasks!)
+            {
+                boardCards[card.Status].Children.Add(CreateBoardCard(card.Title, card.NextStep));
+            }
+        }
+
+        var showBoard = sample || saved;
+        boardHeading.Text = sample ? "Sample board" : saved ? "Saved task board" : "";
+        AutomationProperties.SetName(boardView, boardHeading.Text);
+        boardView.Visibility = showBoard ? Visibility.Visible : Visibility.Collapsed;
+        var content = showBoard ? boardView : compactTask;
         content.ChangeView(null, 0, null, disableAnimation: true);
         body.HorizontalAlignment = showBoard ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
         UpdateContentWidth();
@@ -524,14 +545,12 @@ internal sealed class BreakWindow : Window
     internal bool HasForeground => Desktop.IsForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
     internal bool PlacementIsCurrent => AppWindow.IsVisible && SurfaceWindow.IsCurrent(this, placement);
 
-    internal bool TryShow(nint source, BreakLayout layout, string? task, string? nextStep = null, bool longBreak = false)
+    internal bool TryShow(nint source)
     {
         if (!SurfaceWindow.TryPlaceBreak(this, source, out placement))
         {
             return false;
         }
-        title.Text = longBreak ? "Time for a long break" : "Time for a short break";
-        SetPreview(layout, task, nextStep);
         Activate();
         if (!AppWindow.IsVisible)
         {
@@ -571,14 +590,13 @@ internal sealed class BreakWindow : Window
         }
         textScale = state.TextScale;
         UpdateContentWidth();
-        LayoutSampleColumns();
+        LayoutBoardColumns();
     }
 
     private void UpdateContentWidth()
     {
-        var showBoard = sampleBoard.Visibility == Visibility.Visible;
-        body.MaxWidth = (showBoard ? 720 : 410) + 240 * (textScale - 1);
-        body.MinWidth = showBoard ? 0 : 250;
+        var showBoard = boardView.Visibility == Visibility.Visible;
+        body.MaxWidth = (showBoard ? 960 : 410) + 240 * (textScale - 1);
     }
 
     internal void StopSceneEntrance()
@@ -625,21 +643,16 @@ internal sealed class BreakWindow : Window
         Margin = new Thickness(0, 19, 0, 0),
     };
 
-    private Border CreateSampleBoard()
+    private Border CreateBoard()
     {
-        var heading = SurfaceStyle.Label("Sample board", 18, FontWeights.SemiBold);
-        heading.Foreground = foreground;
-        heading.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level1);
-
         var lanes = new[]
         {
-            CreateLane("To do", 0x97C0EE, "Draft the handover note", "Schedule the design review"),
-            CreateLane("In progress", 0xF2B462, "Check the quotation totals"),
-            CreateLane("Done", 0x9ACBA7, "Send the drawings"),
+            CreateLane(TaskStatus.ToDo, "To do", 0x97C0EE),
+            CreateLane(TaskStatus.InProgress, "In progress", 0xF2B462),
+            CreateLane(TaskStatus.Done, "Done", 0x9ACBA7),
         };
         var columns = new Grid { ColumnSpacing = 10 };
-        sampleColumns = columns;
+        boardColumns = columns;
         foreach (var lane in lanes)
         {
             Grid.SetColumn(lane, columns.Children.Count);
@@ -649,10 +662,10 @@ internal sealed class BreakWindow : Window
         }
 
         var board = new StackPanel { Spacing = 12 };
-        board.Children.Add(heading);
+        board.Children.Add(boardHeading);
         board.Children.Add(columns);
 
-        columns.SizeChanged += (_, _) => LayoutSampleColumns();
+        columns.SizeChanged += (_, _) => LayoutBoardColumns();
 
         return new Border
         {
@@ -665,16 +678,24 @@ internal sealed class BreakWindow : Window
         };
     }
 
-    private void LayoutSampleColumns()
+    private void PopulateSampleBoard()
     {
-        var columns = sampleColumns;
+        boardCards[TaskStatus.ToDo].Children.Add(CreateBoardCard("Draft the handover note"));
+        boardCards[TaskStatus.ToDo].Children.Add(CreateBoardCard("Schedule the design review"));
+        boardCards[TaskStatus.InProgress].Children.Add(CreateBoardCard("Check the quotation totals"));
+        boardCards[TaskStatus.Done].Children.Add(CreateBoardCard("Send the drawings"));
+    }
+
+    private void LayoutBoardColumns()
+    {
+        var columns = boardColumns;
         var stack = columns.ActualWidth < 460 * textScale;
-        if (stack == stackSample)
+        if (stack == stackBoard)
         {
             return;
         }
 
-        stackSample = stack;
+        stackBoard = stack;
         columns.ColumnSpacing = stack ? 0 : 10;
         columns.RowSpacing = stack ? 10 : 0;
         for (var index = 0; index < columns.Children.Count; index++)
@@ -686,7 +707,7 @@ internal sealed class BreakWindow : Window
         }
     }
 
-    private Border CreateLane(string name, uint statusColor, params string[] samples)
+    private Border CreateLane(TaskStatus laneStatus, string name, uint statusColor)
     {
         var label = SurfaceStyle.Label(name, 15, FontWeights.SemiBold);
         label.Foreground = foreground;
@@ -710,21 +731,9 @@ internal sealed class BreakWindow : Window
 
         var lane = new StackPanel { Spacing = 8 };
         lane.Children.Add(header);
-        foreach (var sample in samples)
-        {
-            var task = SurfaceStyle.Label(sample, 15);
-            task.Foreground = foreground;
-            task.TextWrapping = TextWrapping.Wrap;
-            lane.Children.Add(new Border
-            {
-                Background = cardBackground,
-                BorderBrush = cardStroke,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(10, 8, 10, 8),
-                Child = task,
-            });
-        }
+        var cards = new StackPanel { Spacing = 8 };
+        boardCards.Add(laneStatus, cards);
+        lane.Children.Add(cards);
 
         return new Border
         {
@@ -734,6 +743,31 @@ internal sealed class BreakWindow : Window
             CornerRadius = new CornerRadius(7),
             Padding = new Thickness(10),
             Child = lane,
+        };
+    }
+
+    private Border CreateBoardCard(string taskTitle, string? nextStep = null)
+    {
+        var task = SurfaceStyle.Label(taskTitle, 15);
+        task.Foreground = foreground;
+        task.TextWrapping = TextWrapping.Wrap;
+        var card = new StackPanel { Spacing = 4 };
+        card.Children.Add(task);
+        if (!string.IsNullOrEmpty(nextStep))
+        {
+            var note = SurfaceStyle.Label(nextStep, 13);
+            note.Foreground = subdued;
+            note.TextWrapping = TextWrapping.Wrap;
+            card.Children.Add(note);
+        }
+        return new Border
+        {
+            Background = cardBackground,
+            BorderBrush = cardStroke,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            Padding = new Thickness(10, 8, 10, 8),
+            Child = card,
         };
     }
 }

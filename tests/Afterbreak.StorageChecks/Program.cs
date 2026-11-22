@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 
 namespace Afterbreak;
 
@@ -23,6 +24,10 @@ internal static class Program
             Console.WriteLine("PASS schema-one migration, physical corruption and failed migration preservation");
             CheckReminderWriteFailure(Path.Combine(temporary.FullName, "reminder-writes.db"));
             Console.WriteLine("PASS reminder settings and checkpoint commit together and roll back together");
+            CheckBreakDisplayMigration(temporary.FullName);
+            Console.WriteLine("PASS schema-four break display migration preserves privacy, checkpoint and other data");
+            CheckBreakDisplayRejection(temporary.FullName);
+            Console.WriteLine("PASS invalid or ignored break display writes leave prior data intact");
             CheckCaptureMigration(temporary.FullName);
             Console.WriteLine("PASS capture preferences migration preserves v1/v2 tasks and existing reminder state");
             CapturePreferenceChecks.Run(temporary.FullName);
@@ -204,7 +209,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 4L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 5L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -256,7 +261,7 @@ internal static class Program
         var store = new TaskStore(path);
         store.Add("Unaffected task");
         var initialTasks = TaskFingerprint(path);
-        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 60, WorkingHours = true, TimerOnly = true };
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 60, WorkingHours = true, BreakDisplay = BreakDisplay.TimerOnly };
         var checkpoint = new ReminderCheckpoint(ReminderPhase.Work, TimeSpan.FromSeconds(50), 2, true,
             TimeSpan.FromSeconds(2), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         store.SaveReminders(settings, checkpoint);
@@ -269,23 +274,135 @@ internal static class Program
             "A settings write failure preserves the prior configuration, checkpoint, and tasks.");
     }
 
+    private static void CheckBreakDisplayMigration(string folder)
+    {
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 2, true,
+            TimeSpan.FromSeconds(4), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid migration fixture shortcut");
+        var appearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
+        foreach (var timerOnly in new bool?[] { true, false, null })
+        {
+            var path = Path.Combine(folder, $"display-v4-{timerOnly}.db");
+            CreateSchemaOne(path);
+            var store = new TaskStore(path);
+            store.SaveAppearance(appearance);
+            store.SaveCaptureShortcut(shortcut);
+            store.DismissCaptureGuide();
+            var settings = ReminderSettings.Default with
+            {
+                Enabled = true,
+                WorkSeconds = 250,
+                WorkingHours = true,
+                BreakDisplay = timerOnly == true ? BreakDisplay.TimerOnly : BreakDisplay.SavedTaskBoard,
+            };
+            if (timerOnly.HasValue)
+            {
+                store.SaveReminders(settings, checkpoint);
+                WriteLegacyReminderSettings(path, settings);
+            }
+            ExecuteSql(path, "PRAGMA user_version = 4;");
+            var tasks = TaskFingerprint(path);
+            var rawCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
+
+            var migrated = store.LoadReminders();
+            var reopened = new TaskStore(path);
+            Require(Scalar(path, "PRAGMA user_version") is 5L && migrated == reopened.LoadReminders() &&
+                migrated.Settings == (timerOnly.HasValue ? settings : ReminderSettings.Default) &&
+                migrated.Checkpoint == (timerOnly.HasValue ? checkpoint : null) &&
+                Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
+                "Migration preserves the legacy privacy selection and exact checkpoint across restart.");
+            Require(TaskFingerprint(path) == tasks && reopened.LoadAppearance() == appearance &&
+                reopened.LoadCapturePreferences() == new CapturePreferences(shortcut, true),
+                "Migration preserves task IDs, ordering, archive, notes, appearance, shortcut and guide.");
+        }
+    }
+
+    private static void CheckBreakDisplayRejection(string folder)
+    {
+        var path = Path.Combine(folder, "display-rejections.db");
+        CreateSchemaOne(path);
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Work, settings.WorkLength, 0, false,
+            TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        store.SaveReminders(settings, checkpoint);
+        WriteLegacyReminderSettings(path, settings);
+        ExecuteSql(path, "PRAGMA user_version = 4;");
+        var cases = new[]
+        {
+            """UPDATE reminder_state SET settings = replace(settings, ',"TimerOnly":true', '');""",
+            """UPDATE reminder_state SET settings = replace(settings, '"TimerOnly":true', '"TimerOnly":true,"TimerOnly":false');""",
+            """UPDATE reminder_state SET checkpoint = 'null';""",
+            """CREATE TRIGGER reject_upgrade BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(IGNORE); END;""",
+        };
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var blocked = Path.Combine(folder, $"display-blocked-{index}.db");
+            File.Copy(path, blocked);
+            ExecuteSql(blocked, cases[index]);
+            var bytes = File.ReadAllBytes(blocked);
+            ExpectStorageError(() => new TaskStore(blocked).LoadReminders());
+            Require(Scalar(blocked, "PRAGMA user_version") is 4L && File.ReadAllBytes(blocked).SequenceEqual(bytes),
+                "Malformed state or a suppressed upgrade leaves the old schema and data byte-identical.");
+        }
+
+        Require(store.LoadReminders() == (settings, checkpoint), "The independent original fixture migrates successfully.");
+        ExecuteSql(path, "CREATE TRIGGER ignore_display BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(IGNORE); END;");
+        var previous = File.ReadAllBytes(path);
+        ExpectStorageError(() => store.SaveReminders(settings with { BreakDisplay = BreakDisplay.OneTask }, checkpoint));
+        ExpectStorageError(() => store.SaveReminders(settings with { BreakDisplay = (BreakDisplay)40 }, checkpoint));
+        Require(store.LoadReminders() == (settings, checkpoint) && File.ReadAllBytes(path).SequenceEqual(previous),
+            "Ignored or invalid saves preserve the prior privacy choice and checkpoint.");
+        ExecuteSql(path, "DROP TRIGGER ignore_display;");
+        var newSettings = settings with { BreakDisplay = BreakDisplay.OneTask };
+        store.SaveReminders(newSettings, checkpoint);
+        Require(new TaskStore(path).LoadReminders() == (newSettings, checkpoint), "Retry persists the validated display choice.");
+
+        ExecuteSql(path, "PRAGMA ignore_check_constraints = ON; UPDATE tasks SET status = 4294967296 WHERE id = 1;");
+        ExpectStorageError(() => store.List(archived: false));
+    }
+
+    private static void WriteLegacyReminderSettings(string path, ReminderSettings settings)
+    {
+        var legacy = JsonSerializer.Serialize(new
+        {
+            settings.Enabled,
+            settings.WorkSeconds,
+            settings.ShortSeconds,
+            settings.LongSeconds,
+            settings.WorkingHours,
+            settings.StartMinute,
+            settings.EndMinute,
+            TimerOnly = settings.BreakDisplay == BreakDisplay.TimerOnly,
+        });
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE reminder_state SET settings = $legacy WHERE id = 1";
+        command.Parameters.AddWithValue("$legacy", legacy);
+        command.ExecuteNonQuery();
+    }
+
     private static void CheckCaptureMigration(string folder)
     {
         var path = Path.Combine(folder, "schema-v2.db");
         CreateSchemaOne(path);
         var fingerprint = TaskFingerprint(path);
-        var reminders = ReminderSettings.Default with { Enabled = true, WorkSeconds = 33, TimerOnly = true };
+        var reminders = ReminderSettings.Default with { Enabled = true, WorkSeconds = 33, BreakDisplay = BreakDisplay.TimerOnly };
         var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 3, true,
             TimeSpan.FromSeconds(7), new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         new TaskStore(path).SaveReminders(reminders, checkpoint);
+        WriteLegacyReminderSettings(path, reminders);
         ExecuteSql(path, "DROP TABLE appearance_preferences; DROP TABLE capture_preferences; PRAGMA user_version = 2;");
-        var savedReminderRow = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
+        var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 4L && TaskFingerprint(path) == fingerprint &&
-            Equals(savedReminderRow, Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1")),
-            "Migration leaves the existing task and reminder rows byte-identical.");
+        Require(Scalar(path, "PRAGMA user_version") is 5L && TaskFingerprint(path) == fingerprint &&
+            migrated.LoadReminders() == (reminders, checkpoint) &&
+            Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
+            "Migration keeps tasks, the timer-only choice and the checkpoint.");
+        var savedReminderRow = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
         Require(CaptureShortcut.TryParse("Ctrl+Shift+F5", out var shortcut), "A test shortcut can be parsed.");
         migrated.SaveCaptureShortcut(shortcut);
         migrated.DismissCaptureGuide();
@@ -340,16 +457,20 @@ internal static class Program
         var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromMinutes(2), 2, false,
             TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         store.SaveReminders(settings, checkpoint);
+        WriteLegacyReminderSettings(path, settings);
         Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid preference shortcut fixture");
         store.SaveCaptureShortcut(shortcut);
         store.DismissCaptureGuide();
         ExecuteSql(path, "DROP TABLE appearance_preferences; PRAGMA user_version = 3;");
         var tasks = TaskFingerprint(path);
         var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
-        var reminder = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
+        var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
-        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 4L,
-            "v3 upgrade defaults to System/Dusk");
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 5L &&
+            store.LoadReminders() == (settings, checkpoint) &&
+            Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
+            "v3 upgrade defaults to System/Dusk and maintains the reminder checkpoint");
+        var reminder = Scalar(path, "SELECT settings || checkpoint FROM reminder_state WHERE id = 1");
         var choice = new AppearancePreferences(AppearanceTheme.Light, BreakScene.Daylight);
         store.SaveAppearance(choice);
         Require(new TaskStore(path).LoadAppearance() == choice && TaskFingerprint(path) == tasks &&

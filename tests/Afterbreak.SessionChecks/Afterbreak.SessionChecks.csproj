@@ -9,6 +9,7 @@
     <Compile Include="../../AfterbreakSession.cs" Link="AfterbreakSession.cs" />
     <Compile Include="../../ReminderSession.cs" Link="ReminderSession.cs" />
     <Compile Include="../../TrayMenuState.cs" Link="TrayMenuState.cs" />
+    <Compile Include="../../BreakView.cs" Link="BreakView.cs" />
     <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
     <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
     <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />

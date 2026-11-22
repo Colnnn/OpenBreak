@@ -34,7 +34,6 @@ namespace Microsoft.UI.Dispatching
 
 namespace Afterbreak
 {
-    internal enum BreakLayout { Compact, SampleBoard }
 
     internal sealed class Desktop
     {
@@ -225,6 +224,7 @@ namespace Afterbreak
         public static string? Text { get; private set; }
         public static string? Note { get; private set; }
         public static BreakLayout Layout { get; private set; }
+        public static IReadOnlyList<BoardTask>? SavedTasks { get; private set; }
         public bool IsLong { get; private set; }
         public int Seconds { get; private set; }
         public bool Foreground { get; set; } = true;
@@ -235,7 +235,17 @@ namespace Afterbreak
         public int Attempts { get; private set; }
         public void StopSceneEntrance() { }
 
-        public bool TryShow(nint source, BreakLayout layout, string? task, string? note = null, bool longBreak = false)
+        public void SetPreview(BreakView view, bool longBreak = false)
+        {
+            Layout = view.Layout;
+            Text = view.Task?.Title;
+            Note = view.Task?.NextStep;
+            SavedTasks = view.Tasks;
+            IsLong = longBreak;
+            Seconds = 10;
+        }
+
+        public bool TryShow(nint source)
         {
             Attempts++;
             if (!CanPlace)
@@ -243,10 +253,6 @@ namespace Afterbreak
                 return false;
             }
             Shows++;
-            Text = task;
-            Note = note;
-            Layout = layout;
-            IsLong = longBreak;
             IsVisible = true;
             RetainedDisplayAvailable = true;
             return true;

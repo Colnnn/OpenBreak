@@ -8,7 +8,7 @@ internal sealed class SettingsWindow : Window
 {
     private readonly ToggleSwitch enabled = new() { Header = "Scheduled reminders" };
     private readonly ToggleSwitch hours = new() { Header = "Limit reminders to working hours" };
-    private readonly CheckBox timerOnly = new() { Content = "Show only the timer during breaks" };
+    private readonly ComboBox breakDisplay = new() { Header = "Break display", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly NumberBox work = Duration("Work interval (seconds)", 5, 86400);
     private readonly NumberBox shortBreak = Duration("Short break (seconds)", 1, 3600);
     private readonly NumberBox longBreak = Duration("Long break (seconds)", 1, 3600);
@@ -26,6 +26,9 @@ internal sealed class SettingsWindow : Window
     {
         this.save = save;
         Title = "Afterbreak · Reminder settings";
+        breakDisplay.Items.Add("Saved task board (default)");
+        breakDisplay.Items.Add("One task");
+        breakDisplay.Items.Add("Timer only");
 
         var title = SurfaceStyle.Label("Reminder settings", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
@@ -61,7 +64,7 @@ internal sealed class SettingsWindow : Window
         form.Children.Add(cadence);
         form.Children.Add(hours);
         form.Children.Add(times);
-        form.Children.Add(timerOnly);
+        form.Children.Add(breakDisplay);
         form.Children.Add(privacy);
         form.Children.Add(error);
         form.Children.Add(saveButton);
@@ -101,17 +104,7 @@ internal sealed class SettingsWindow : Window
     {
         if (!AppWindow.IsVisible)
         {
-            enabled.IsOn = settings.Enabled;
-            hours.IsOn = settings.WorkingHours;
-            start.Time = TimeSpan.FromMinutes(settings.StartMinute);
-            end.Time = TimeSpan.FromMinutes(settings.EndMinute);
-            times.Visibility = settings.WorkingHours ? Visibility.Visible : Visibility.Collapsed;
-            work.Value = settings.WorkSeconds;
-            shortBreak.Value = settings.ShortSeconds;
-            longBreak.Value = settings.LongSeconds;
-            timerOnly.IsChecked = settings.TimerOnly;
-            error.Message = "Reminder settings could not be loaded. Check the database and try saving again.";
-            error.IsOpen = storageError;
+            SetForm(settings, storageError);
         }
 
         SetStatus(description);
@@ -125,6 +118,21 @@ internal sealed class SettingsWindow : Window
         {
             AppWindow.Show();
         }
+    }
+
+    internal void SetForm(ReminderSettings settings, bool storageError)
+    {
+        enabled.IsOn = settings.Enabled;
+        hours.IsOn = settings.WorkingHours;
+        start.Time = TimeSpan.FromMinutes(settings.StartMinute);
+        end.Time = TimeSpan.FromMinutes(settings.EndMinute);
+        times.Visibility = settings.WorkingHours ? Visibility.Visible : Visibility.Collapsed;
+        work.Value = settings.WorkSeconds;
+        shortBreak.Value = settings.ShortSeconds;
+        longBreak.Value = settings.LongSeconds;
+        breakDisplay.SelectedIndex = (int)settings.BreakDisplay;
+        error.Message = "Reminder settings are unavailable. Reopen this window to retry loading your settings.";
+        error.IsOpen = storageError;
     }
 
     internal void SetStatus(string description)
@@ -149,8 +157,15 @@ internal sealed class SettingsWindow : Window
             return;
         }
 
+        var display = (BreakDisplay)breakDisplay.SelectedIndex;
+        if (!Enum.IsDefined(display))
+        {
+            Report("Choose a break display.");
+            return;
+        }
+
         var settings = new ReminderSettings(enabled.IsOn, (int)work.Value, (int)shortBreak.Value, (int)longBreak.Value,
-            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, timerOnly.IsChecked == true);
+            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, display);
         if (!settings.IsValid)
         {
             Report("Check the durations and choose different start and end times for working hours.");

@@ -63,7 +63,7 @@ internal sealed partial class TaskStore(string path)
             INSERT INTO tasks (title, next_step, status, position, archived) VALUES ($title, $note, $status, $position, 0)
             """, ("$title", title), ("$note", (object?)nextStep ?? DBNull.Value), ("$status", (int)TaskStatus.ToDo),
             ("$position", position));
-        insert.ExecuteNonQuery();
+        EnsureTaskChanged(insert);
         transaction.Commit();
     }
 

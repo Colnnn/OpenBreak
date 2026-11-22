@@ -13,6 +13,7 @@ internal static class Program
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
+            CheckIgnoredCaptureInsert(Path.Combine(temporary.FullName, "ignored-capture.db"));
             BreakDisplayChecks.Run(temporary.FullName);
             CheckTrayMenuPolicy();
             CheckCaptureMotionStudy(Path.Combine(temporary.FullName, "motion-study.db"));
@@ -27,6 +28,48 @@ internal static class Program
         {
             temporary.Delete(recursive: true);
         }
+    }
+
+    private static void CheckIgnoredCaptureInsert(string path)
+    {
+        var store = new TaskStore(path);
+        store.Add("Existing task");
+        var before = store.List(archived: false);
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
+        using var connection = new SqliteConnection(connectionString);
+        connection.Open();
+        using var trigger = connection.CreateCommand();
+        trigger.CommandText = """
+            CREATE TRIGGER ignore_capture BEFORE INSERT ON tasks
+            BEGIN
+                UPDATE tasks SET title = 'Unexpected trigger change';
+                SELECT RAISE(IGNORE);
+            END;
+            """;
+        trigger.ExecuteNonQuery();
+
+        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store);
+        var tray = Desktop.Current;
+        tray.Send(TrayCommand.Capture, 701);
+        var capture = CaptureWindow.Current;
+        capture.Input = "Retain the title";
+        capture.NextStep = "Retain the next step";
+        var returns = SurfaceWindow.Returns;
+
+        Check(!capture.Save(capture.Input, capture.NextStep) && capture.IsVisible &&
+            capture.Input == "Retain the title" && capture.NextStep == "Retain the next step" &&
+            store.List(archived: false).SequenceEqual(before) && SurfaceWindow.Returns == returns,
+            "an ignored SQLite insert keeps both draft fields and rolls back task changes");
+
+        trigger.CommandText = "DROP TRIGGER ignore_capture;";
+        trigger.ExecuteNonQuery();
+        Check(capture.Save(capture.Input, capture.NextStep) && !capture.IsVisible &&
+            !capture.Save(capture.Input, capture.NextStep) && SurfaceWindow.Returned == 701 &&
+            SurfaceWindow.Returns == returns + 1 &&
+            new TaskStore(path).List(archived: false) is [var existing,
+                { Title: "Retain the title", NextStep: "Retain the next step" }] && existing == before.Single(),
+            "retry saves the retained title and next step once and returns to the original host");
+        tray.Send(TrayCommand.Quit);
     }
 
     private static void CheckTrayMenuPolicy()

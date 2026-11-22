@@ -153,6 +153,19 @@ internal static class PlacementLifecycleChecks
             "real shell presentation suppression still dismisses an unfocused break");
         tray.SystemPause = ReminderPause.None;
         overlay.Foreground = true;
+        tray.WorkSource = 401;
+        tray.Send(TrayCommand.Preview);
+        TickAt(10);
+        var returns = SurfaceWindow.Returns;
+        var attempts = overlay.Attempts;
+        tray.WorkSource = 402;
+        TickAt(1);
+        TickAt(2);
+        overlay.End();
+        Check(!overlay.IsVisible && !queue.Timer.Running && overlay.Attempts == attempts &&
+            SurfaceWindow.Returns == returns + 1 && SurfaceWindow.Returned == 401,
+            "the break surface ends once, returning to the host recorded when it opened");
+
         tray.Send(TrayCommand.Preview);
         TickAt(10);
         tray.SystemPause = ReminderPause.Locked;

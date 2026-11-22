@@ -576,11 +576,7 @@ internal sealed class BreakWindow : Window
         {
             return false;
         }
-        Activate();
-        if (!AppWindow.IsVisible)
-        {
-            AppWindow.Show();
-        }
+        SurfaceWindow.ShowAndActivate(this);
         end.Focus(FocusState.Programmatic);
         StartSceneEntrance();
         return true;

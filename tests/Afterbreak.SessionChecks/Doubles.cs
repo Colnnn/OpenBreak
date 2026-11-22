@@ -243,7 +243,15 @@ namespace Afterbreak
 
     internal sealed class BreakWindow : TestSurface
     {
-        public BreakWindow(Action dismiss) => Current = this;
+        private readonly Action dismiss;
+
+        public BreakWindow(Action dismiss)
+        {
+            this.dismiss = dismiss;
+            Current = this;
+        }
+
+        public void End() => dismiss();
 
         public static BreakWindow Current { get; private set; } = null!;
         public static int Shows { get; private set; }

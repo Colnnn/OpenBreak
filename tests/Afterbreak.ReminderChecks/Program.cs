@@ -16,6 +16,7 @@ internal static class Program
         ClockAndHours();
         Restart();
         ExplicitWorkPause();
+        ConfigurableRhythm();
     }
 
     private static void CadenceAndSnooze()
@@ -228,6 +229,69 @@ internal static class Program
         scheduler = new ReminderScheduler(clock, updated, saved);
         Expect(scheduler.Settings == updated && scheduler.Remaining.TotalSeconds == 28 && !scheduler.WorkPaused,
             "a quick restart after resume preserves the current interval before using the newly configured duration");
+    }
+
+    private static void ConfigurableRhythm()
+    {
+        var clock = new TestClock(Noon);
+        var settings = ShortCycle with { ShortsBeforeLong = 4, SnoozeSeconds = 73 };
+        var scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 5);
+        scheduler.Snooze();
+        Expect(scheduler.Phase == ReminderPhase.Snoozed && scheduler.Remaining.TotalSeconds == 73,
+            "a new snooze uses the configured exact seconds");
+        Step(scheduler, clock, 10);
+        scheduler.SetWorkPause(true, ReminderPause.None);
+        var shorter = settings with { SnoozeSeconds = 1 };
+        scheduler = scheduler.WithSettings(shorter);
+        clock.Advance(TimeSpan.FromHours(2));
+        scheduler = new ReminderScheduler(clock, shorter, scheduler.Checkpoint());
+        scheduler.SetWorkPause(false, ReminderPause.None);
+        var resumed = scheduler.Checkpoint();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        scheduler = new ReminderScheduler(clock, shorter, resumed);
+        Expect(scheduler.Phase == ReminderPhase.Snoozed && scheduler.Remaining.TotalSeconds == 63 && !scheduler.WorkPaused,
+            "a shorter configured snooze leaves the currently paused then resumed snooze intact across restarts");
+        Step(scheduler, clock, 63);
+        scheduler.Snooze();
+        Expect(scheduler.Remaining.TotalSeconds == 1, "the next snooze uses the updated one-second duration");
+        Step(scheduler, clock, 11);
+        var remaining = scheduler.Remaining;
+        scheduler = scheduler.WithSettings(shorter with { SnoozeSeconds = 3600 });
+        Expect(scheduler.Phase == ReminderPhase.Break && scheduler.Remaining == remaining,
+            "a snooze-only edit leaves an active break intact");
+        Step(scheduler, clock, 3);
+        Step(scheduler, clock, 18);
+        Expect(scheduler.CompletedShorts == 2 && !scheduler.IsLongBreak,
+            "two short completions accumulate under a threshold of four");
+
+        var lowered = settings with { ShortsBeforeLong = 1 };
+        scheduler = scheduler.WithSettings(lowered);
+        Expect(scheduler.CompletedShorts == 1 && scheduler.IsLongBreak && scheduler.Settings.BreakLength(1).TotalSeconds == 8,
+            "lowering the threshold caps earned shorts and puts a long break next");
+        Step(scheduler, clock, 15);
+        scheduler.Skip();
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.IsLongBreak,
+            "ending a configured long break early leaves it due");
+        scheduler = scheduler.WithSettings(settings with { ShortsBeforeLong = 2 });
+        Expect(scheduler.CompletedShorts == 1 && !scheduler.IsLongBreak,
+            "raising the threshold retains earned shorts and waits for the balance");
+        Step(scheduler, clock, 18);
+        Step(scheduler, clock, 23);
+        Expect(scheduler.CompletedShorts == 0 && !scheduler.IsLongBreak,
+            "naturally completing a custom long break resets earned shorts");
+
+        Step(scheduler, clock, 18);
+        scheduler = scheduler.WithSettings(settings with { LongBreaks = false, ShortsBeforeLong = 12 });
+        Step(scheduler, clock, 18 * 13);
+        Expect(scheduler.Phase == ReminderPhase.Work && scheduler.CompletedShorts == 0 && !scheduler.IsLongBreak,
+            "disabling long breaks clears cadence and never accumulates long-break credit");
+        scheduler = scheduler.WithSettings(settings with { ShortsBeforeLong = 12 });
+        Step(scheduler, clock, 18 * 12);
+        Expect(scheduler.CompletedShorts == 12 && scheduler.IsLongBreak,
+            "the maximum threshold works after re-enabling long breaks from zero");
+        Expect(ReminderDuration.Format(73) == "1 min 13 sec" && ReminderDuration.Format(1) == "1 sec" &&
+            ReminderDuration.Format(3600) == "60 min", "duration labels preserve odd seconds and exact whole minutes");
     }
 
     private static void Step(ReminderScheduler scheduler, TestClock clock, int seconds, ReminderPause reasons = ReminderPause.None)

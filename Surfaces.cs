@@ -279,6 +279,7 @@ internal sealed class WarningWindow : Window
 {
     private readonly TextBlock title;
     private readonly TextBlock detail;
+    private readonly Button snoozeButton = new();
     private readonly StackPanel actions;
     private readonly Border indicator;
     private SurfacePlacement placement;
@@ -293,7 +294,7 @@ internal sealed class WarningWindow : Window
         title.TextWrapping = TextWrapping.Wrap;
         detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", 13);
         detail.TextWrapping = TextWrapping.Wrap;
-        var snoozeButton = new Button { Content = "Snooze 5 min" };
+        SetSnoozeDuration(ReminderSettings.DefaultSnoozeSeconds);
         snoozeButton.Click += (_, _) => snooze();
         var skipButton = new Button { Content = "Skip break" };
         skipButton.Click += (_, _) => skip();
@@ -343,6 +344,15 @@ internal sealed class WarningWindow : Window
     internal void ShowPrepared() => AppWindow.Show(activateWindow: false);
 
     internal void ShowSaveError(string message) => detail.Text = message;
+
+    internal void SetSnoozeDuration(int seconds)
+    {
+        var label = $"Snooze {ReminderDuration.Format(seconds)}";
+        if (!Equals(snoozeButton.Content, label))
+        {
+            snoozeButton.Content = label;
+        }
+    }
 
     internal bool PlacementIsCurrent => SurfaceWindow.IsCurrent(this, placement);
     internal string DescribePlacement() => SurfaceWindow.DescribePlacement(this, placement);

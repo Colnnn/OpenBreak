@@ -17,7 +17,9 @@ internal enum FocusAction
 
 internal sealed record FocusSnapshot(bool Enabled, ReminderPhase Phase, int Seconds, ReminderPause PausedBy,
     int CompletedShorts, int UpcomingBreakSeconds, BoardTask? NextTask, bool TaskUnavailable,
-    bool RemindersUnavailable, ReminderPhase? PreviewPhase, int PreviewSeconds, FocusAction Actions)
+    bool RemindersUnavailable, ReminderPhase? PreviewPhase, int PreviewSeconds, FocusAction Actions,
+    bool LongBreaks = true, int ShortsBeforeLong = ReminderSettings.DefaultShortsBeforeLong,
+    int SnoozeSeconds = ReminderSettings.DefaultSnoozeSeconds)
 {
-    internal bool NextBreakIsLong => CompletedShorts == 3;
+    internal bool NextBreakIsLong => LongBreaks && CompletedShorts >= ShortsBeforeLong;
 }

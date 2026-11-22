@@ -116,8 +116,10 @@ internal sealed class FocusPage : UserControl
         });
         SetText(pauses, PauseDescription(snapshot.PausedBy, snapshot.PreviewPhase.HasValue));
         SetText(nextBreak, $"{(snapshot.Phase is ReminderPhase.Warning or ReminderPhase.Break ? "Scheduled" : "Next")} " +
-            $"{(snapshot.NextBreakIsLong ? "long" : "short")} break · {FriendlyDuration(snapshot.UpcomingBreakSeconds)}");
-        SetText(cadence, $"{snapshot.CompletedShorts} of 3 short breaks completed");
+            $"{(snapshot.NextBreakIsLong ? "long" : "short")} break · {ReminderDuration.Format(snapshot.UpcomingBreakSeconds)}");
+        SetText(cadence, snapshot.LongBreaks
+            ? $"{snapshot.CompletedShorts} of {snapshot.ShortsBeforeLong} short breaks completed"
+            : "Long breaks off");
         SetText(task, snapshot.TaskUnavailable ? "Saved tasks are unavailable" : snapshot.NextTask?.Title ?? "No saved task yet");
         SetText(nextStep, snapshot.NextTask?.NextStep ?? "");
         pauses.Visibility = pauses.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -129,7 +131,7 @@ internal sealed class FocusPage : UserControl
         previewAction = snapshot.PreviewPhase.HasValue ? FocusAction.CancelPreview : FocusAction.Preview;
         SetButton(startStop, startStopAction, snapshot.Enabled ? "Stop focus" : "Start focus", alwaysVisible: true);
         SetButton(pauseResume, pauseResumeAction, pauseResumeAction == FocusAction.Pause ? "Pause work" : "Resume work");
-        SetButton(snooze, FocusAction.Snooze, "Snooze 5 minutes");
+        SetButton(snooze, FocusAction.Snooze, $"Snooze {ReminderDuration.Format(snapshot.SnoozeSeconds)}");
         SetButton(skip, skipAction, skipAction == FocusAction.EndBreak ? "End break" : "Skip break");
         SetButton(preview, previewAction, snapshot.PreviewPhase.HasValue ? "Cancel preview" : "Preview a break", alwaysVisible: true);
 
@@ -219,9 +221,6 @@ internal sealed class FocusPage : UserControl
     private static string Duration(int seconds) => seconds >= 3600
         ? $"{seconds / 3600}:{seconds / 60 % 60:00}:{seconds % 60:00}"
         : $"{seconds / 60:00}:{seconds % 60:00}";
-
-    private static string FriendlyDuration(int seconds) => seconds % 60 == 0 ? $"{seconds / 60} min" :
-        seconds < 60 ? $"{seconds} sec" : $"{seconds / 60} min {seconds % 60} sec";
 
     private static string PauseDescription(ReminderPause pauses, bool previewing)
     {

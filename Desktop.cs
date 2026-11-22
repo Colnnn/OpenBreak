@@ -96,6 +96,7 @@ internal sealed class Desktop : IDisposable
     internal bool MenuOpen => trayMenu.Current is not null;
     internal bool TrayFlyoutHasForeground => MenuOpen && trayFlyout?.HasForeground == true;
     internal bool SnoozeAvailable { get; set; }
+    internal int SnoozeSeconds { get; set; } = ReminderSettings.DefaultSnoozeSeconds;
     internal bool SkipAvailable { get; set; }
     internal bool ManuallyPaused { get; set; }
     internal string ReminderStatus { get; set; } = "Reminders off";
@@ -374,7 +375,7 @@ internal sealed class Desktop : IDisposable
 
     private TrayMenuState CurrentTrayMenu() => new(CaptureBinding.Active?.ToString(),
         PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None,
-        DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable);
+        DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable, SnoozeSeconds);
 
     internal void RefreshTrayFlyout()
     {

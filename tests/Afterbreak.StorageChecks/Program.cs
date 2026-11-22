@@ -37,6 +37,10 @@ internal static class Program
             Console.WriteLine("PASS appearance upgrade and rollback preserve task order, archive, shortcut, guide and reminder records");
             CheckWorkPauseMigration(temporary.FullName);
             Console.WriteLine("PASS version-five migration, durable work pause and rejection of invalid work-pause state");
+            CheckRhythmMigration(temporary.FullName);
+            Console.WriteLine("PASS version-six rhythm upgrade keeps exact timing, work pause and other user data");
+            CheckRhythmRejection(temporary.FullName);
+            Console.WriteLine("PASS malformed rhythm settings and ignored upgrades preserve the database");
         }
         finally
         {
@@ -211,7 +215,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 6L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 7L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -271,8 +275,8 @@ internal static class Program
         store.DismissCaptureGuide();
         var capture = store.LoadCapturePreferences();
         store.SaveReminders(settings, checkpoint);
-        ExecuteSql(path, "ALTER TABLE reminder_state DROP COLUMN work_paused; PRAGMA user_version = 5;");
-        var raw = Scalar(path, "SELECT settings || checkpoint FROM reminder_state");
+        WriteLegacyRhythmSettings(path, version: 5);
+        var rawCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state");
         var tasks = TaskFingerprint(path);
 
         var blocked = Path.Combine(folder, "work-pause-corrupt-v5.db");
@@ -283,12 +287,12 @@ internal static class Program
         Require(Scalar(blocked, "PRAGMA user_version") is 5L && File.ReadAllBytes(blocked).SequenceEqual(bytes),
             "An invalid version-five checkpoint leaves the old schema and file byte-identical.");
 
-        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 6L &&
+        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 7L &&
             Scalar(path, "SELECT work_paused FROM reminder_state") is 0L,
             "A legacy reminder defaults to work unpaused and keeps its presentation pause and cadence.");
-        Require(Equals(raw, Scalar(path, "SELECT settings || checkpoint FROM reminder_state")) &&
+        Require(Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")) &&
             TaskFingerprint(path) == tasks && store.LoadAppearance() == appearance && store.LoadCapturePreferences() == capture,
-            "Version six preserves reminder JSON, task ordering, capture and appearance preferences.");
+            "Version seven preserves the reminder checkpoint, task ordering, capture and appearance preferences.");
 
         var paused = checkpoint with { WorkPaused = true };
         store.SaveReminders(settings, paused);
@@ -315,6 +319,94 @@ internal static class Program
         Require(new TaskStore(path).LoadReminders() == (settings, checkpoint) && TaskFingerprint(path) == initialTasks,
             "A settings write failure preserves the prior configuration, checkpoint, and tasks.");
     }
+
+    private static void CheckRhythmMigration(string folder)
+    {
+        var path = Path.Combine(folder, "rhythm-v6.db");
+        CreateSchemaOne(path);
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with
+        {
+            Enabled = true, WorkSeconds = 1811, ShortSeconds = 43, LongSeconds = 307, WorkingHours = true,
+            StartMinute = 8 * 60 + 17, EndMinute = 17 * 60 + 43, BreakDisplay = BreakDisplay.OneTask,
+        };
+        var paused = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromSeconds(241), 2, true,
+            TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero)) { WorkPaused = true };
+        store.SaveReminders(settings, paused);
+        var appearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
+        store.SaveAppearance(appearance);
+        Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid migration fixture shortcut");
+        store.SaveCaptureShortcut(shortcut);
+        store.DismissCaptureGuide();
+        WriteLegacyRhythmSettings(path, version: 6);
+        var tasks = TaskFingerprint(path);
+        var checkpoint = Scalar(path, "SELECT checkpoint FROM reminder_state");
+        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 7L &&
+            store.LoadCapturePreferences() == new CapturePreferences(shortcut, true) && store.LoadAppearance() == appearance &&
+            TaskFingerprint(path) == tasks && Equals(checkpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")),
+            "v6 migration keeps all exact old durations, opted-in hours, settings, task order and paused snooze while adding defaults");
+
+        var custom = settings with { LongBreaks = false, ShortsBeforeLong = 9, SnoozeSeconds = 61 };
+        store.SaveReminders(custom, paused with { CompletedShorts = 0 });
+        Require(new TaskStore(path).LoadReminders() == (custom, paused with { CompletedShorts = 0 }),
+            "v7 reopens custom rhythm and retains an earlier paused snooze longer than the new snooze duration");
+    }
+
+    private static void CheckRhythmRejection(string folder)
+    {
+        var path = Path.Combine(folder, "rhythm-invalid.db");
+        CreateSchemaOne(path);
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Work, settings.WorkLength, 0, false,
+            TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        store.SaveReminders(settings, checkpoint);
+        var cases = new[]
+        {
+            "json_remove(settings, '$.LongBreaks')",
+            "json_remove(settings, '$.SnoozeSeconds')",
+            "json_set(settings, '$.LongBreaks', 1)",
+            "json_set(settings, '$.ShortsBeforeLong', 13)",
+            "json_set(settings, '$.SnoozeSeconds', 0)",
+            "json_set(settings, '$.SnoozeSeconds', 3601)",
+            "replace(settings, '\"ShortsBeforeLong\":3', '\"ShortsBeforeLong\":3,\"ShortsBeforeLong\":4')",
+        };
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var corrupted = Path.Combine(folder, $"rhythm-invalid-{index}.db");
+            File.Copy(path, corrupted);
+            ExecuteSql(corrupted, $"UPDATE reminder_state SET settings = {cases[index]} WHERE id = 1;");
+            var before = File.ReadAllBytes(corrupted);
+            ExpectStorageError(() => new TaskStore(corrupted).LoadReminders());
+            Require(File.ReadAllBytes(corrupted).SequenceEqual(before), "Corrupt rhythm settings are preserved for recovery.");
+        }
+        ExpectStorageError(() => store.SaveReminders(settings with { ShortsBeforeLong = 0 }, checkpoint));
+        ExpectStorageError(() => store.SaveReminders(settings with { LongBreaks = false }, checkpoint with { CompletedShorts = 1 }));
+        Require(store.LoadReminders() == (settings, checkpoint), "Invalid proposed rhythm writes preserve saved reminders.");
+
+        foreach (var version in new[] { 5, 6 })
+        {
+            var blocked = Path.Combine(folder, $"rhythm-blocked-v{version}.db");
+            File.Copy(path, blocked);
+            WriteLegacyRhythmSettings(blocked, version);
+            ExecuteSql(blocked, """
+                CREATE TRIGGER reject_rhythm BEFORE UPDATE ON reminder_state BEGIN
+                    UPDATE tasks SET title = 'Unexpected update';
+                    SELECT RAISE(IGNORE);
+                END;
+                """);
+            var before = File.ReadAllBytes(blocked);
+            ExpectStorageError(() => new TaskStore(blocked).LoadReminders());
+            Require(File.ReadAllBytes(blocked).SequenceEqual(before) && Scalar(blocked, "PRAGMA user_version") is long actual &&
+                actual == version, "An ignored rhythm migration rolls back the version, settings and any prior work.");
+        }
+    }
+
+    private static void WriteLegacyRhythmSettings(string path, int version) => ExecuteSql(path, $"""
+        UPDATE reminder_state SET settings = json_remove(settings, '$.LongBreaks', '$.ShortsBeforeLong', '$.SnoozeSeconds');
+        {(version == 5 ? "ALTER TABLE reminder_state DROP COLUMN work_paused;" : "")}
+        PRAGMA user_version = {version};
+        """);
 
     private static void CheckBreakDisplayMigration(string folder)
     {
@@ -348,7 +440,7 @@ internal static class Program
 
             var migrated = store.LoadReminders();
             var reopened = new TaskStore(path);
-            Require(Scalar(path, "PRAGMA user_version") is 6L && migrated == reopened.LoadReminders() &&
+            Require(Scalar(path, "PRAGMA user_version") is 7L && migrated == reopened.LoadReminders() &&
                 migrated.Settings == (timerOnly.HasValue ? settings : ReminderSettings.Default) &&
                 migrated.Checkpoint == (timerOnly.HasValue ? checkpoint : null) &&
                 Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
@@ -445,7 +537,7 @@ internal static class Program
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 6L && TaskFingerprint(path) == fingerprint &&
+        Require(Scalar(path, "PRAGMA user_version") is 7L && TaskFingerprint(path) == fingerprint &&
             migrated.LoadReminders() == (reminders, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "Migration keeps tasks, the timer-only choice and the checkpoint.");
@@ -517,7 +609,7 @@ internal static class Program
         var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
         var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
-        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 6L &&
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 7L &&
             store.LoadReminders() == (settings, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "v3 upgrade defaults to System/Dusk and maintains the reminder checkpoint");

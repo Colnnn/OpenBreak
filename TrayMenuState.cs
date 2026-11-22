@@ -23,7 +23,8 @@ internal readonly record struct TrayMenuItem(TrayCommand Command, string Label, 
 }
 
 internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview, string? DismissLabel,
-    string ReminderStatus, bool ManuallyPaused, bool SnoozeAvailable, bool SkipAvailable)
+    string ReminderStatus, bool ManuallyPaused, bool SnoozeAvailable, bool SkipAvailable,
+    int SnoozeSeconds = ReminderSettings.DefaultSnoozeSeconds)
 {
     internal TrayMenuItem[] Items() =>
     [
@@ -34,7 +35,7 @@ internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview,
         new(TrayCommand.EndBreak, DismissLabel ?? "", Visible: DismissLabel is not null),
         new(TrayCommand.Settings, "Settings"),
         new(TrayCommand.TogglePause, ManuallyPaused ? "Resume after presentation" : "Pause for presentation"),
-        new(TrayCommand.Snooze, "Snooze 5 min", Visible: SnoozeAvailable),
+        new(TrayCommand.Snooze, $"Snooze {ReminderDuration.Format(SnoozeSeconds)}", Visible: SnoozeAvailable),
         new(TrayCommand.Skip, "Skip break", Visible: SkipAvailable),
         new(TrayCommand.Quit, "Quit Afterbreak"),
     ];

@@ -53,6 +53,7 @@ namespace Afterbreak
         public bool TrayFlyoutHasForeground => MenuOpen && TrayMenuHasFocus;
         public bool LastPresentationCheck { get; private set; }
         public bool SnoozeAvailable { get; set; }
+        public int SnoozeSeconds { get; set; } = ReminderSettings.DefaultSnoozeSeconds;
         public bool SkipAvailable { get; set; }
         public bool ManuallyPaused { get; set; }
         public string ReminderStatus { get; set; } = "";
@@ -210,6 +211,8 @@ namespace Afterbreak
         public Action Skip { get; }
         public string? SaveError { get; private set; }
         public void ShowSaveError(string message) => SaveError = message;
+        public int SnoozeSeconds { get; private set; } = ReminderSettings.DefaultSnoozeSeconds;
+        public void SetSnoozeDuration(int seconds) => SnoozeSeconds = seconds;
 
         public bool TryShow(nint source, string? breakKind = null)
         {

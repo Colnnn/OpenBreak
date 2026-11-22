@@ -1,4 +1,6 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -10,13 +12,19 @@ internal sealed class ReminderSettingsPage : UserControl
 {
     private readonly ToggleSwitch enabled = new() { Header = "Scheduled reminders" };
     private readonly ToggleSwitch hours = new() { Header = "Limit reminders to working hours" };
+    private readonly ToggleSwitch longBreaks = new() { Header = "Long breaks" };
     private readonly ComboBox breakDisplay = CreateBreakDisplaySelector();
-    private readonly NumberBox work = Duration("Work interval (seconds)", 5, 86400);
-    private readonly NumberBox shortBreak = Duration("Short break (seconds)", 1, 3600);
-    private readonly NumberBox longBreak = Duration("Long break (seconds)", 1, 3600);
+    private readonly DurationEditor work = new("Work interval", 1440);
+    private readonly DurationEditor shortBreak = new("Short break", 60);
+    private readonly DurationEditor longBreak = new("Long break", 60);
+    private readonly DurationEditor snooze = new("Snooze", 60);
+    private readonly TextBox cadence = NumberField("Short breaks before a long break (1–12)", "Completed short breaks before a long break, 1 to 12");
     private readonly TimePicker start = new() { Header = "Start" };
     private readonly TimePicker end = new() { Header = "End" };
-    private readonly Grid times = new() { ColumnSpacing = 12 };
+    private readonly Grid firstDurations = PairGrid();
+    private readonly Grid secondDurations = PairGrid();
+    private readonly Grid times = PairGrid();
+    private readonly StackPanel actions = new() { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = false };
     private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", 14);
     private readonly Func<ReminderSettings, bool> save;
@@ -27,21 +35,16 @@ internal sealed class ReminderSettingsPage : UserControl
     internal ReminderSettingsPage(Func<ReminderSettings, bool> save)
     {
         this.save = save;
-        var title = SurfaceStyle.Label("Breaks", 27, FontWeights.SemiBold);
-        title.TextWrapping = TextWrapping.Wrap;
-        var cadence = SurfaceStyle.SecondaryLabel("A long break follows three completed short breaks.", 13);
-        cadence.TextWrapping = TextWrapping.Wrap;
+        var title = Heading("Breaks", 27, AutomationHeadingLevel.Level1);
+        var rhythmHint = SurfaceStyle.SecondaryLabel("Only completed short breaks count. Turning long breaks off clears the count.", 13);
+        rhythmHint.TextWrapping = TextWrapping.Wrap;
         var privacy = SurfaceStyle.SecondaryLabel("Pause for presentation from the tray whenever you share your screen.", 13);
         privacy.TextWrapping = TextWrapping.Wrap;
         status.TextWrapping = TextWrapping.Wrap;
-        times.ColumnDefinitions.Add(new ColumnDefinition());
-        times.ColumnDefinitions.Add(new ColumnDefinition());
-        times.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        times.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        times.Children.Add(start);
-        Grid.SetColumn(end, 1);
-        times.Children.Add(end);
-        times.SizeChanged += (_, _) => LayoutTimes();
+        AddPair(firstDurations, work, shortBreak, 560);
+        AddPair(secondDurations, longBreak, cadence, 560);
+        AddPair(times, start, end, 440);
+        cadence.VerticalAlignment = VerticalAlignment.Bottom;
         hours.Toggled += (_, _) => times.Visibility = hours.IsOn ? Visibility.Visible : Visibility.Collapsed;
 
         var saveButton = new Button { Content = "Save settings", HorizontalAlignment = HorizontalAlignment.Right };
@@ -57,18 +60,39 @@ internal sealed class ReminderSettingsPage : UserControl
         form.Children.Add(title);
         form.Children.Add(status);
         form.Children.Add(enabled);
-        form.Children.Add(work);
-        form.Children.Add(shortBreak);
-        form.Children.Add(longBreak);
-        form.Children.Add(cadence);
+        form.Children.Add(Heading("Work and rest", 18));
+        form.Children.Add(firstDurations);
+        form.Children.Add(longBreaks);
+        form.Children.Add(secondDurations);
+        form.Children.Add(rhythmHint);
         form.Children.Add(hours);
         form.Children.Add(times);
+        form.Children.Add(Heading("During a break", 18));
         form.Children.Add(breakDisplay);
+        form.Children.Add(snooze);
         form.Children.Add(privacy);
-        form.Children.Add(error);
-        form.Children.Add(saveButton);
-        form.Children.Add(discard);
-        Content = SurfaceStyle.Scroll(form);
+
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(SurfaceStyle.Scroll(form));
+        var footer = new StackPanel { Spacing = 8, Margin = new Thickness(20, 8, 20, 12) };
+        actions.Children.Add(saveButton);
+        actions.Children.Add(discard);
+        footer.Children.Add(error);
+        footer.Children.Add(actions);
+        footer.SizeChanged += (_, _) => LayoutActions(footer.ActualWidth);
+        Grid.SetRow(footer, 1);
+        root.Children.Add(footer);
+        Content = root;
+
+        void AddPair(Grid grid, FrameworkElement first, FrameworkElement second, double minimumWidth)
+        {
+            grid.Children.Add(first);
+            grid.Children.Add(second);
+            grid.SizeChanged += (_, _) => LayoutPair(grid, first, second, minimumWidth, textScale);
+            LayoutPair(grid, first, second, minimumWidth, textScale);
+        }
     }
 
     internal static ComboBox CreateBreakDisplaySelector()
@@ -92,7 +116,7 @@ internal sealed class ReminderSettingsPage : UserControl
         var focused = FocusManager.GetFocusedElement(xamlRoot) as DependencyObject;
         for (var element = focused; element is not null && element != this; element = VisualTreeHelper.GetParent(element))
         {
-            if (element is NumberBox or TimePicker)
+            if (element is TextBox or TimePicker)
             {
                 return true;
             }
@@ -102,21 +126,38 @@ internal sealed class ReminderSettingsPage : UserControl
 
     internal void ApplyAppearance(AppearanceState state)
     {
-        if (textScale != state.TextScale)
-        {
-            textScale = state.TextScale;
-            LayoutTimes();
-        }
+        textScale = state.TextScale;
+        work.SetTextScale(textScale);
+        shortBreak.SetTextScale(textScale);
+        longBreak.SetTextScale(textScale);
+        snooze.SetTextScale(textScale);
+        LayoutPair(firstDurations, work, shortBreak, 560, textScale);
+        LayoutPair(secondDurations, longBreak, cadence, 560, textScale);
+        LayoutPair(times, start, end, 440, textScale);
+        LayoutActions(ActualWidth - 40);
     }
 
-    private void LayoutTimes()
+    private void LayoutActions(double width) => actions.Orientation = width < 300 * textScale
+        ? Orientation.Vertical : Orientation.Horizontal;
+
+    private static Grid PairGrid()
     {
-        var stack = times.ActualWidth < 440 * textScale;
-        times.RowSpacing = stack ? 8 : 0;
-        Grid.SetColumnSpan(start, stack ? 2 : 1);
-        Grid.SetColumn(end, stack ? 0 : 1);
-        Grid.SetColumnSpan(end, stack ? 2 : 1);
-        Grid.SetRow(end, stack ? 1 : 0);
+        var pair = new Grid { ColumnSpacing = 12 };
+        pair.ColumnDefinitions.Add(new ColumnDefinition());
+        pair.ColumnDefinitions.Add(new ColumnDefinition());
+        pair.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        pair.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        return pair;
+    }
+
+    private static void LayoutPair(Grid pair, FrameworkElement first, FrameworkElement second, double minimumWidth, double scale)
+    {
+        var stack = pair.ActualWidth < minimumWidth * scale;
+        pair.RowSpacing = stack ? 8 : 0;
+        Grid.SetColumnSpan(first, stack ? 2 : 1);
+        Grid.SetColumn(second, stack ? 0 : 1);
+        Grid.SetColumnSpan(second, stack ? 2 : 1);
+        Grid.SetRow(second, stack ? 1 : 0);
     }
 
     internal void SetForm(ReminderSettings settings, bool storageError)
@@ -128,9 +169,12 @@ internal sealed class ReminderSettingsPage : UserControl
         start.Time = TimeSpan.FromMinutes(settings.StartMinute);
         end.Time = TimeSpan.FromMinutes(settings.EndMinute);
         times.Visibility = settings.WorkingHours ? Visibility.Visible : Visibility.Collapsed;
-        work.Value = settings.WorkSeconds;
-        shortBreak.Value = settings.ShortSeconds;
-        longBreak.Value = settings.LongSeconds;
+        work.SetSeconds(settings.WorkSeconds);
+        shortBreak.SetSeconds(settings.ShortSeconds);
+        longBreak.SetSeconds(settings.LongSeconds);
+        snooze.SetSeconds(settings.SnoozeSeconds);
+        longBreaks.IsOn = settings.LongBreaks;
+        cadence.Text = settings.ShortsBeforeLong.ToString();
         breakDisplay.SelectedIndex = (int)settings.BreakDisplay;
         error.Message = "Reminder settings are unavailable. Return to Breaks to retry loading your settings.";
         error.IsOpen = storageError;
@@ -164,12 +208,6 @@ internal sealed class ReminderSettingsPage : UserControl
 
     private void Save()
     {
-        if (!Whole(work.Value) || !Whole(shortBreak.Value) || !Whole(longBreak.Value))
-        {
-            Report("Enter each duration in whole seconds.");
-            return;
-        }
-
         var display = (BreakDisplay)breakDisplay.SelectedIndex;
         if (!Enum.IsDefined(display))
         {
@@ -178,9 +216,17 @@ internal sealed class ReminderSettingsPage : UserControl
         }
 
         var settings = ReadDraft();
-        if (settings is null || !settings.IsValid)
+        if (settings is null)
         {
-            Report("Check the durations and choose different start and end times for working hours.");
+            Report("Enter whole minutes and seconds, with seconds from 0 to 59. Choose 1 to 12 short breaks.");
+        }
+        else if (settings.WorkingHours && settings.StartMinute == settings.EndMinute)
+        {
+            Report("Choose different start and end times for working hours.");
+        }
+        else if (!settings.IsValid)
+        {
+            Report("Set work to 5 seconds–24 hours and breaks and snooze to 1 second–60 minutes.");
         }
         else if (!save(settings))
         {
@@ -190,33 +236,95 @@ internal sealed class ReminderSettingsPage : UserControl
         {
             saved = settings;
             loadError = false;
-            error.IsOpen = false;
+            error.Severity = InfoBarSeverity.Success;
+            error.Message = "Break settings saved.";
+            error.IsOpen = true;
         }
     }
 
     private ReminderSettings? ReadDraft()
     {
-        if (!Whole(work.Value) || !Whole(shortBreak.Value) || !Whole(longBreak.Value))
+        if (work.ReadSeconds() is not int workSeconds || shortBreak.ReadSeconds() is not int shortSeconds ||
+            longBreak.ReadSeconds() is not int longSeconds || snooze.ReadSeconds() is not int snoozeSeconds ||
+            !int.TryParse(cadence.Text, out var shortsBeforeLong) || shortsBeforeLong is < 1 or > ReminderSettings.MaxShortsBeforeLong)
         {
             return null;
         }
-        return new ReminderSettings(enabled.IsOn, (int)work.Value, (int)shortBreak.Value, (int)longBreak.Value,
-            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, (BreakDisplay)breakDisplay.SelectedIndex);
+        return new ReminderSettings(enabled.IsOn, workSeconds, shortSeconds, longSeconds,
+            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, (BreakDisplay)breakDisplay.SelectedIndex)
+        {
+            LongBreaks = longBreaks.IsOn,
+            ShortsBeforeLong = shortsBeforeLong,
+            SnoozeSeconds = snoozeSeconds,
+        };
     }
 
     private void Report(string message)
     {
+        error.Severity = InfoBarSeverity.Error;
         error.Message = message;
         error.IsOpen = true;
     }
 
-    private static bool Whole(double value) => double.IsFinite(value) && value == Math.Truncate(value);
-
-    private static NumberBox Duration(string label, int minimum, int maximum) => new()
+    private static TextBlock Heading(string text, int size, AutomationHeadingLevel level = AutomationHeadingLevel.Level2)
     {
-        Header = label,
-        Minimum = minimum,
-        Maximum = maximum,
-        SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-    };
+        var heading = SurfaceStyle.Label(text, size, FontWeights.SemiBold);
+        heading.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(heading, level);
+        return heading;
+    }
+
+    private static TextBox NumberField(string header, string name)
+    {
+        var field = new TextBox
+        {
+            Header = SurfaceStyle.Label(header, 14),
+            InputScope = new InputScope { Names = { new InputScopeName(InputScopeNameValue.Number) } },
+        };
+        ((TextBlock)field.Header).TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetName(field, name);
+        return field;
+    }
+
+    private sealed class DurationEditor : StackPanel
+    {
+        private readonly Grid fields = PairGrid();
+        private readonly TextBox minutes;
+        private readonly TextBox seconds;
+        private readonly int maximumMinutes;
+        private double textScale = 1;
+
+        internal DurationEditor(string label, int maximumMinutes)
+        {
+            this.maximumMinutes = maximumMinutes;
+            minutes = NumberField("Minutes", $"{label}, minutes");
+            seconds = NumberField("Seconds", $"{label}, seconds");
+            Spacing = 4;
+            Children.Add(Heading(label, 15, AutomationHeadingLevel.Level3));
+            fields.Children.Add(minutes);
+            fields.Children.Add(seconds);
+            fields.SizeChanged += (_, _) => Layout();
+            Children.Add(fields);
+            Layout();
+        }
+
+        internal void SetSeconds(int value)
+        {
+            minutes.Text = (value / ReminderDuration.SecondsPerMinute).ToString();
+            seconds.Text = (value % ReminderDuration.SecondsPerMinute).ToString();
+        }
+
+        internal int? ReadSeconds() => int.TryParse(minutes.Text, out var wholeMinutes) && wholeMinutes >= 0 &&
+            wholeMinutes <= maximumMinutes && int.TryParse(seconds.Text, out var wholeSeconds) &&
+            wholeSeconds is >= 0 and < ReminderDuration.SecondsPerMinute
+            ? wholeMinutes * ReminderDuration.SecondsPerMinute + wholeSeconds : null;
+
+        internal void SetTextScale(double scale)
+        {
+            textScale = scale;
+            Layout();
+        }
+
+        private void Layout() => LayoutPair(fields, minutes, seconds, 230, textScale);
+    }
 }

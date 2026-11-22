@@ -1,18 +1,45 @@
+using System.Text.Json.Serialization;
+
 namespace Afterbreak;
+
+internal static class ReminderDuration
+{
+    internal const int SecondsPerMinute = 60;
+
+    internal static string Format(int seconds) => seconds % SecondsPerMinute == 0 ? $"{seconds / SecondsPerMinute} min" :
+        seconds < SecondsPerMinute ? $"{seconds} sec" : $"{seconds / SecondsPerMinute} min {seconds % SecondsPerMinute} sec";
+}
 
 internal enum BreakDisplay { SavedTaskBoard = 0, OneTask = 1, TimerOnly = 2 }
 
 internal sealed record ReminderSettings(bool Enabled, int WorkSeconds, int ShortSeconds, int LongSeconds,
     bool WorkingHours, int StartMinute, int EndMinute, BreakDisplay BreakDisplay)
 {
+    internal const int MaxShortsBeforeLong = 12;
+    internal const int MaxSnoozeSeconds = 3600;
+    internal const int DefaultShortsBeforeLong = 3;
+    internal const int DefaultSnoozeSeconds = 300;
+
     internal static ReminderSettings Default { get; } = new(false, 1800, 30, 300, false, 9 * 60, 17 * 60, BreakDisplay.SavedTaskBoard);
+
+    [JsonRequired]
+    public bool LongBreaks { get; init; } = true;
+
+    [JsonRequired]
+    public int ShortsBeforeLong { get; init; } = DefaultShortsBeforeLong;
+
+    [JsonRequired]
+    public int SnoozeSeconds { get; init; } = DefaultSnoozeSeconds;
 
     internal bool IsValid => WorkSeconds is >= 5 and <= 86400 && ShortSeconds is >= 1 and <= 3600 &&
         LongSeconds is >= 1 and <= 3600 && StartMinute is >= 0 and < 1440 && EndMinute is >= 0 and < 1440 &&
-        (!WorkingHours || StartMinute != EndMinute) && Enum.IsDefined(BreakDisplay);
+        (!WorkingHours || StartMinute != EndMinute) && Enum.IsDefined(BreakDisplay) &&
+        ShortsBeforeLong is >= 1 and <= MaxShortsBeforeLong && SnoozeSeconds is >= 1 and <= MaxSnoozeSeconds;
 
     internal TimeSpan WorkLength => TimeSpan.FromSeconds(WorkSeconds);
-    internal TimeSpan BreakLength(int completedShorts) => TimeSpan.FromSeconds(completedShorts == 3 ? LongSeconds : ShortSeconds);
+    internal TimeSpan SnoozeLength => TimeSpan.FromSeconds(SnoozeSeconds);
+    internal bool IsLongBreak(int completedShorts) => LongBreaks && completedShorts >= ShortsBeforeLong;
+    internal TimeSpan BreakLength(int completedShorts) => TimeSpan.FromSeconds(IsLongBreak(completedShorts) ? LongSeconds : ShortSeconds);
 
     // The start date identifies a working window even when it spans midnight.
     internal DateOnly? WindowOn(DateTimeOffset local)
@@ -57,7 +84,6 @@ internal sealed record ReminderCheckpoint(ReminderPhase Phase, TimeSpan Remainin
 internal sealed class ReminderScheduler
 {
     internal static readonly TimeSpan WarningLength = TimeSpan.FromSeconds(10);
-    internal static readonly TimeSpan SnoozeLength = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan LongTickGap = TimeSpan.FromSeconds(5);
     private const ReminderPause AwayReasons = ReminderPause.Manual | ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.Presentation;
     private readonly TimeProvider clock;
@@ -95,8 +121,8 @@ internal sealed class ReminderScheduler
             saved.Phase is ReminderPhase.Work or ReminderPhase.Snoozed)
         {
             Phase = saved.Phase;
-            // A duration change during a work pause is applied to subsequent intervals.
-            Remaining = Phase == ReminderPhase.Snoozed && saved.Remaining > SnoozeLength ? SnoozeLength : saved.Remaining;
+            // Settings edits can leave a current interval longer than the configured duration.
+            Remaining = saved.Remaining;
             away = elapsed + saved.Away;
         }
     }
@@ -108,7 +134,7 @@ internal sealed class ReminderScheduler
     internal bool ManuallyPaused { get; private set; }
     internal bool WorkPaused => (PausedBy & ReminderPause.Work) != 0;
     internal int CompletedShorts { get; private set; }
-    internal bool IsLongBreak => CompletedShorts == 3;
+    internal bool IsLongBreak => Settings.IsLongBreak(CompletedShorts);
     private TimeSpan BreakLength => Settings.BreakLength(CompletedShorts);
 
     internal void Update(ReminderPause environment)
@@ -189,7 +215,7 @@ internal sealed class ReminderScheduler
                 interruptedBreak = null;
                 break;
             case ReminderPhase.Break:
-                CompletedShorts = IsLongBreak ? 0 : CompletedShorts + 1;
+                CompletedShorts = !Settings.LongBreaks || IsLongBreak ? 0 : CompletedShorts + 1;
                 StartWork();
                 break;
         }
@@ -199,7 +225,7 @@ internal sealed class ReminderScheduler
     {
         if (Phase == ReminderPhase.Warning)
         {
-            Start(ReminderPhase.Snoozed, SnoozeLength);
+            Start(ReminderPhase.Snoozed, Settings.SnoozeLength);
         }
     }
 
@@ -246,20 +272,18 @@ internal sealed class ReminderScheduler
     {
         var old = Settings;
         Settings = settings;
-        if (old with { BreakDisplay = settings.BreakDisplay } == settings)
+        if (old with { BreakDisplay = settings.BreakDisplay, SnoozeSeconds = settings.SnoozeSeconds } == settings)
         {
             return;
         }
 
+        CompletedShorts = old.Enabled && settings.Enabled && settings.LongBreaks
+            ? Math.Min(CompletedShorts, settings.ShortsBeforeLong) : 0;
         if (settings.Enabled && WorkPaused)
         {
             return;
         }
 
-        if (!old.Enabled || !settings.Enabled)
-        {
-            CompletedShorts = 0;
-        }
         StartWork();
         workingWindow = settings.WindowOn(clock.GetLocalNow());
         PausedBy = ManuallyPaused ? ReminderPause.Manual : ReminderPause.None;

@@ -135,6 +135,10 @@ internal sealed partial class AfterbreakSession
         }
 
         var intended = phase == ReminderPhase.Warning ? Surface.Warning : Surface.Preview;
+        if (intended == Surface.Warning)
+        {
+            warning.SetSnoozeDuration(reminders.Settings.SnoozeSeconds);
+        }
         if (!scheduledSurface || visible != intended)
         {
             if (scheduledSurface)
@@ -304,6 +308,7 @@ internal sealed partial class AfterbreakSession
         {
             Dismiss();
         }
+        reminders.StartVisibleCountdown();
         UpdateScheduledReminders();
         return null;
     }
@@ -339,7 +344,6 @@ internal sealed partial class AfterbreakSession
             return false;
         }
         reminders = candidate;
-        reminders.StartVisibleCountdown();
         OnCheckpointSaved();
         reminderActionError = null;
         main?.FocusHome.SetActionError(null);
@@ -409,6 +413,7 @@ internal sealed partial class AfterbreakSession
         desktop.PreviewAvailable = visible == Surface.None && !reminderLoadError && !reminders.ManuallyPaused;
         desktop.SnoozeAvailable = !reminderStorageError && reminders.Settings.Enabled && !reminders.ManuallyPaused &&
             phase == ReminderPhase.Warning && (scheduledSurface || pauses == ReminderPause.Interaction);
+        desktop.SnoozeSeconds = reminders.Settings.SnoozeSeconds;
         desktop.SkipAvailable = desktop.SnoozeAvailable ||
             (!reminderStorageError && reminders.Settings.Enabled && !reminders.WorkPaused && phase == ReminderPhase.Snoozed);
         desktop.ReminderStatus = reminderActionError ?? (reminders.ManuallyPaused ? "Paused for presentation" :
@@ -467,7 +472,7 @@ internal sealed partial class AfterbreakSession
             WholeSeconds(reminders.Remaining), pauses, reminders.CompletedShorts,
             WholeSeconds(settings.BreakLength(reminders.CompletedShorts)), nextFocusTask, focusTaskUnavailable,
             reminderStorageError, previewPhase, previewPhase is null ? 0 : WholeSeconds(ManualPreviewRemaining),
-            AvailableFocusActions(systemPauseForFocus)));
+            AvailableFocusActions(systemPauseForFocus), settings.LongBreaks, settings.ShortsBeforeLong, settings.SnoozeSeconds));
     }
 
     private static int WholeSeconds(TimeSpan remaining) => Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));

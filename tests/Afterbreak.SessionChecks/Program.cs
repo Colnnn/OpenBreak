@@ -24,6 +24,7 @@ internal static class Program
             CheckMainNavigation(Path.Combine(temporary.FullName, "unified-shell.db"));
             CheckLaunchReveal(Path.Combine(temporary.FullName, "launch-reveal.db"));
             CheckFocusHome(Path.Combine(temporary.FullName, "focus-home.db"));
+            CheckRhythmSession(Path.Combine(temporary.FullName, "rhythm.db"));
             CheckQuietReminderActionFailure(Path.Combine(temporary.FullName, "quiet-reminder-error.db"));
             PlacementLifecycleChecks.Run(temporary.FullName);
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
@@ -92,6 +93,10 @@ internal static class Program
             !state.CanInvoke(active.Items().Single(item => item.Command == TrayCommand.Snooze)) &&
             !state.CanInvoke(active.Items().Single(item => item.Command == TrayCommand.Skip)),
             "tray model revalidates transient Snooze and Skip commands against current availability");
+        var customSnooze = active with { SnoozeSeconds = 73 };
+        Check(customSnooze.Items().Single(item => item.Command == TrayCommand.Snooze).Label == "Snooze 1 min 13 sec" &&
+            !customSnooze.CanInvoke(active.Items().Single(item => item.Command == TrayCommand.Snooze)),
+            "a changed custom snooze updates its tray label and invalidates the previous selection");
         Check(!(active with { DismissLabel = "End break" }).CanInvoke(
             active.Items().Single(item => item.Command == TrayCommand.EndBreak)) &&
             !(state with { ManuallyPaused = true }).CanInvoke(items.Single(item => item.Command == TrayCommand.TogglePause)),
@@ -862,6 +867,58 @@ internal static class Program
         overlay.End();
         Check(!overlay.IsVisible && store.LoadReminders().Checkpoint is { Phase: ReminderPhase.Work, CompletedShorts: 0 },
             "retry from the break keeps the previous cadence and returns to work");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckRhythmSession(string path)
+    {
+        var store = new TaskStore(path);
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var settings = ReminderSettings.Default with
+        {
+            Enabled = true, WorkSeconds = 5, ShortSeconds = 3, LongSeconds = 7, ShortsBeforeLong = 1, SnoozeSeconds = 73,
+        };
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var queue = new DispatcherQueue();
+        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        session.RevealFromLaunch();
+        var host = MainWindow.Current;
+        var focus = host.FocusHome;
+        var tray = Desktop.Current;
+        var warning = WarningWindow.Current;
+
+        void Tick(int seconds)
+        {
+            for (var i = 0; i < seconds; i++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                queue.Timers[1].Fire();
+            }
+        }
+
+        Tick(5);
+        Check(focus.Snapshot is { Phase: ReminderPhase.Warning, UpcomingBreakSeconds: 3, SnoozeSeconds: 73, ShortsBeforeLong: 1 } &&
+            warning.IsVisible && WarningWindow.Kind == "Short break" && warning.SnoozeSeconds == 73 && tray.SnoozeSeconds == 73,
+            "one configured snooze duration reaches Focus, the warning and the tray");
+        Check(focus.Execute(FocusAction.Snooze) is null && focus.Snapshot is { Phase: ReminderPhase.Snoozed, Seconds: 73 } &&
+            store.LoadReminders().Checkpoint is { Remaining.TotalSeconds: 73 }, "the Focus action persists the configured snooze");
+        Tick(86);
+        Check(focus.Snapshot is { Phase: ReminderPhase.Work, CompletedShorts: 1, NextBreakIsLong: true, UpcomingBreakSeconds: 7 },
+            "Focus reflects the configured threshold and upcoming long break after a single short completion");
+        Tick(5);
+        Check(warning.IsVisible && WarningWindow.Kind == "Long break", "the scheduled warning agrees with the Focus break kind");
+        tray.Send(TrayCommand.Snooze);
+        Check(focus.Snapshot is { Phase: ReminderPhase.Snoozed, Seconds: 73, NextBreakIsLong: true } &&
+            focus.Execute(FocusAction.Skip) is null && focus.Snapshot.NextBreakIsLong,
+            "tray snooze and skipping a pending long break preserve the shared cadence");
+        host.Navigate(ManagementPage.Breaks);
+        var shortOnly = settings with { LongBreaks = false };
+        Check(host.Breaks.Save(shortOnly) && store.LoadReminders() is { Settings.LongBreaks: false, Checkpoint.CompletedShorts: 0 },
+            "saving short-only rhythm persists the setting and clears a previous due long break");
+        host.Navigate(ManagementPage.Focus);
+        Tick(6);
+        Check(focus.Snapshot is { LongBreaks: false, NextBreakIsLong: false, UpcomingBreakSeconds: 3 } &&
+            warning.IsVisible && WarningWindow.Kind == "Short break", "short-only status and warning agree after settings navigation");
         tray.Send(TrayCommand.Quit);
     }
 }

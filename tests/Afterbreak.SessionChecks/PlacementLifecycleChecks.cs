@@ -10,6 +10,7 @@ internal static class PlacementLifecycleChecks
     {
         Manual(Path.Combine(directory, "manual-displays.db"));
         Scheduled(Path.Combine(directory, "scheduled-displays.db"));
+        DiagnosticTrace(directory);
     }
 
     private static void Manual(string path)
@@ -77,6 +78,43 @@ internal static class PlacementLifecycleChecks
         Check(!overlay.IsVisible && SurfaceWindow.Returns == returns + 1 && !queue.Timer.Running,
             "target removal dismisses a manual break and returns focus once");
         tray.Send(TrayCommand.Quit);
+    }
+
+    private static void DiagnosticTrace(string directory)
+    {
+        var path = Path.Combine(directory, "preview-diagnostics.log");
+        Check(BreakDiagnostics.Open([]) is null && BreakDiagnostics.Open(["--diagnostics", "relative.log"]) is null &&
+            !File.Exists(path), "break diagnostics are opt-in and reject relative paths");
+
+        using var diagnostics = BreakDiagnostics.Open(["--diagnostics", path]) ??
+            throw new InvalidOperationException("Could not open the isolated trace.");
+        var store = new TaskStore(Path.Combine(directory, "diagnostic-preview.db"));
+        store.Add("Private diagnostic fixture task title");
+        var queue = new DispatcherQueue();
+        var session = new AfterbreakSession(queue, () => { }, store, diagnostics: diagnostics);
+        var tray = Desktop.Current;
+        tray.Send(TrayCommand.Preview);
+        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
+        queue.Timer.Fire();
+        tray.CheckSystemPause = () => tray.LastPresentationCheck ? ReminderPause.Presentation : ReminderPause.None;
+        tray.ChangeEligibility("settings-change");
+        Check(!BreakWindow.Current.IsVisible, "diagnostic mode preserves existing automatic eligibility dismissal");
+        tray.Send(TrayCommand.Quit);
+
+        using var reader = new StreamReader(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+        var entries = reader.ReadToEnd();
+        Check(entries.Contains("event=shown phase=Warning mode=manual", StringComparison.Ordinal) &&
+            entries.Contains("event=shown phase=Preview mode=manual", StringComparison.Ordinal) &&
+            entries.Contains("event=dismiss phase=Preview mode=manual reason=settings-change-eligibility", StringComparison.Ordinal) &&
+            entries.Contains("expectedMs=10000 foreground=True", StringComparison.Ordinal) &&
+            entries.Contains("shellState=2", StringComparison.Ordinal) &&
+            !entries.Contains("Private diagnostic fixture task title", StringComparison.Ordinal),
+            "the diagnostic trace distinguishes the source and decision without logging task content");
+        Check(BreakDiagnostics.Open(["--diagnostics", path]) is null,
+            "a second diagnostic run cannot replace an existing log or fail app startup");
+        Check(BreakDiagnostics.Open(["--diagnostics", path + ":alternate.log"]) is null,
+            "diagnostics cannot add an alternate data stream to an existing file");
     }
 
     private static void Scheduled(string path)

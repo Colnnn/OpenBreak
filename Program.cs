@@ -15,12 +15,13 @@ internal static class Program
         }
 
         var captureMotionStudy = args.Contains("--capture-motion-study", StringComparer.Ordinal);
+        using var diagnostics = BreakDiagnostics.Open(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(initialization =>
         {
             var dispatcher = DispatcherQueue.GetForCurrentThread();
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(dispatcher));
-            new AfterbreakApp(captureMotionStudy);
+            new AfterbreakApp(captureMotionStudy, diagnostics);
         });
     }
 }
@@ -28,16 +29,19 @@ internal static class Program
 public sealed partial class AfterbreakApp : Application
 {
     private readonly bool captureMotionStudy;
+    private readonly BreakDiagnostics? diagnostics;
     private AfterbreakSession? session;
 
-    internal AfterbreakApp(bool captureMotionStudy = false)
+    internal AfterbreakApp(bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null)
     {
         this.captureMotionStudy = captureMotionStudy;
+        this.diagnostics = diagnostics;
         InitializeComponent();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        session = new AfterbreakSession(DispatcherQueue.GetForCurrentThread(), Exit, captureMotionStudy: captureMotionStudy);
+        session = new AfterbreakSession(DispatcherQueue.GetForCurrentThread(), Exit, captureMotionStudy: captureMotionStudy,
+            diagnostics: diagnostics);
     }
 }

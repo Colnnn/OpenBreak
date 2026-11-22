@@ -102,7 +102,7 @@ internal sealed class Desktop : IDisposable
     internal bool ManuallyPaused { get; set; }
     internal string ReminderStatus { get; set; } = "Reminders off";
     internal event Action<TrayCommand, nint>? Command;
-    internal event Action? EligibilityChanged;
+    internal event Action<string>? EligibilityChanged;
     internal event Action? DisplaysChanged;
 
     internal void ConfigureTrayFlyout(WindowAppearance appearance, Func<nint, Action<TrayCommand>> bindCommand)
@@ -115,13 +115,31 @@ internal sealed class Desktop : IDisposable
     {
         var pause = (locked || disconnected ? ReminderPause.Locked : ReminderPause.None) |
             (suspended ? ReminderPause.Suspended : ReminderPause.None);
-        if (pause == ReminderPause.None && (!HasInputDesktop() ||
-            (checkPresentation && (SHQueryUserNotificationState(out var state) != 0 || state != 5))))
+        bool? inputDesktop = null;
+        int? shellResult = null;
+        int? shellState = null;
+        if (pause == ReminderPause.None)
         {
-            pause |= ReminderPause.Presentation;
+            inputDesktop = HasInputDesktop();
+            if (inputDesktop == false)
+            {
+                pause |= ReminderPause.Presentation;
+            }
+            else if (checkPresentation)
+            {
+                shellResult = SHQueryUserNotificationState(out var state);
+                shellState = state;
+                if (shellResult != 0 || state != 5)
+                {
+                    pause |= ReminderPause.Presentation;
+                }
+            }
         }
+        LastBreakEligibility = new(pause, inputDesktop, shellResult, shellState);
         return pause;
     }
+
+    internal BreakEligibilitySample LastBreakEligibility { get; private set; }
 
     private static bool HasInputDesktop()
     {
@@ -506,7 +524,7 @@ internal sealed class Desktop : IDisposable
             {
                 DismissTray();
             }
-            EligibilityChanged?.Invoke();
+            EligibilityChanged?.Invoke("session-change");
             return 0;
         }
         if (message == PowerBroadcast && wParam is 4 or 7 or 18)
@@ -517,7 +535,7 @@ internal sealed class Desktop : IDisposable
             {
                 DismissTray();
             }
-            EligibilityChanged?.Invoke();
+            EligibilityChanged?.Invoke("power-change");
             return 1;
         }
         if (message == TimeChange)
@@ -527,7 +545,7 @@ internal sealed class Desktop : IDisposable
         if (message is SettingChange or TimeChange)
         {
             DismissIfTrayPlacementInvalid();
-            EligibilityChanged?.Invoke();
+            EligibilityChanged?.Invoke(message == SettingChange ? "settings-change" : "time-change");
         }
         if (message == DisplayChange)
         {

@@ -29,8 +29,8 @@ internal sealed partial class AfterbreakSession
         reminderTimer = dispatcher.CreateTimer();
         reminderTimer.Interval = TimeSpan.FromMilliseconds(250);
         reminderTimer.Tick += (_, _) => UpdateScheduledReminders();
-        desktop.EligibilityChanged += () => UpdateScheduledReminders(recheckPresentation: true);
-        desktop.DisplaysChanged += () => EndIfPlacementInvalid();
+        desktop.EligibilityChanged += reason => UpdateScheduledReminders(recheckPresentation: true, reason);
+        desktop.DisplaysChanged += () => EndIfPlacementInvalid("display-notification");
         lastCheckpoint = reminderClock.GetTimestamp();
         TryLoadReminderSettings();
     }
@@ -77,9 +77,9 @@ internal sealed partial class AfterbreakSession
         (desktop.MenuOpen && visible != Surface.Preview) || reminderSettings?.AppWindow.IsVisible == true ||
         captureSettings?.AppWindow.IsVisible == true || appearanceSettings?.AppWindow.IsVisible == true || board?.IsEditing == true;
 
-    private void UpdateScheduledReminders(bool recheckPresentation = false)
+    private void UpdateScheduledReminders(bool recheckPresentation = false, string reason = "reminder-tick")
     {
-        if (EndIfPlacementInvalid())
+        if (EndIfPlacementInvalid(reason))
         {
             return;
         }
@@ -92,7 +92,7 @@ internal sealed partial class AfterbreakSession
         if (!scheduledSurface && visible is (Surface.Warning or Surface.Preview) &&
             (systemPause != ReminderPause.None || reminders.ManuallyPaused))
         {
-            Dismiss();
+            Dismiss($"{reason}-eligibility");
         }
 
         if (reminders.Settings.Enabled && !reminderStorageError)
@@ -104,7 +104,7 @@ internal sealed partial class AfterbreakSession
             reminders.Update(environment);
             if (scheduledSurface && (reminders.PausedBy != ReminderPause.None || phase != reminders.Phase))
             {
-                Dismiss();
+                Dismiss($"{reason}-phase-or-pause");
             }
             if (checkpointDirty || phase != reminders.Phase || pauses != reminders.PausedBy ||
                 reminderClock.GetElapsedTime(lastCheckpoint) >= CheckpointInterval)
@@ -164,6 +164,7 @@ internal sealed partial class AfterbreakSession
                 : preview.TryShow(source);
             if (!shown)
             {
+                diagnostics?.Write($"event=not-shown phase={intended} mode=scheduled reason=placement");
                 SkipForDisplayLoss();
                 return;
             }
@@ -175,6 +176,7 @@ internal sealed partial class AfterbreakSession
                 desktop.DismissLabel = "End break";
             }
             reminders.StartVisibleCountdown();
+            TraceBreakShown(reminders.Remaining);
         }
 
         var seconds = Math.Max(1, (int)Math.Ceiling(reminders.Remaining.TotalSeconds));
@@ -194,7 +196,7 @@ internal sealed partial class AfterbreakSession
         PersistCheckpoint();
     }
 
-    private bool EndIfPlacementInvalid()
+    private bool EndIfPlacementInvalid(string reason)
     {
         var valid = visible switch
         {
@@ -207,6 +209,7 @@ internal sealed partial class AfterbreakSession
             return false;
         }
 
+        TraceBreak("placement-invalid", reason);
         EndVisibleBreak();
         return true;
     }
@@ -301,14 +304,14 @@ internal sealed partial class AfterbreakSession
         if (reminderLoadError)
         {
             reminders.SetManualPause(paused);
-            UpdateScheduledReminders(recheckPresentation: true);
+            UpdateScheduledReminders(recheckPresentation: true, reason: "manual-presentation-toggle");
             return;
         }
 
         if (paused)
         {
             reminders.SetManualPause(true);
-            UpdateScheduledReminders(recheckPresentation: true);
+            UpdateScheduledReminders(recheckPresentation: true, reason: "manual-presentation-toggle");
         }
 
         if (TryPersist(reminders.Settings, reminders.Checkpoint() with { ManuallyPaused = paused }))
@@ -316,7 +319,7 @@ internal sealed partial class AfterbreakSession
             reminders.SetManualPause(paused);
             UpdateReminderTimer();
         }
-        UpdateScheduledReminders(recheckPresentation: true);
+        UpdateScheduledReminders(recheckPresentation: true, reason: "manual-presentation-toggle");
     }
 
     private void PersistCheckpoint() => TryPersist(reminders.Settings, reminders.Checkpoint());

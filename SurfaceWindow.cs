@@ -87,6 +87,21 @@ internal static class SurfaceWindow
     internal static bool IsCurrent(Window window, SurfacePlacement placement) =>
         IsCurrent(WinRT.Interop.WindowNative.GetWindowHandle(window), placement);
 
+    internal static string DescribePlacement(Window window, SurfacePlacement placement)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        var actual = Desktop.WindowBounds(hwnd);
+        var actualMonitor = Desktop.MonitorForWindow(hwnd);
+        var area = Desktop.MonitorArea(placement.Monitor, placement.UsesWorkArea);
+        var scaleMatches = !placement.UsesWorkArea || Desktop.OwnedWindowScale(hwnd) == placement.OwnedScale;
+        return $"visible={window.AppWindow.IsVisible} monitorMatches={actualMonitor == placement.Monitor} " +
+            $"areaMatches={area == placement.Area} scaleMatches={scaleMatches} " +
+            $"expected={FormatBounds(placement.Bounds)} actual={FormatBounds(actual)}";
+    }
+
+    private static string FormatBounds(PixelRect? bounds) => bounds is { } rect
+        ? $"{rect.X},{rect.Y},{rect.Width},{rect.Height}" : "unavailable";
+
     internal static bool TryPlaceOrRecover(Window window, nint source, int widthDip, int heightDip, bool previouslyPlaced)
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);

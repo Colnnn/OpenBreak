@@ -343,6 +343,7 @@ internal sealed class WarningWindow : Window
     internal void ShowPrepared() => AppWindow.Show(activateWindow: false);
 
     internal bool PlacementIsCurrent => SurfaceWindow.IsCurrent(this, placement);
+    internal string DescribePlacement() => SurfaceWindow.DescribePlacement(this, placement);
 
     internal void ApplyAppearance(AppearanceState state)
     {
@@ -555,6 +556,7 @@ internal sealed class BreakWindow : Window
 
     internal bool HasForeground => Desktop.IsForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
     internal bool PlacementIsCurrent => AppWindow.IsVisible && SurfaceWindow.IsCurrent(this, placement);
+    internal string DescribePlacement() => SurfaceWindow.DescribePlacement(this, placement);
 
     internal bool TryShow(nint source)
     {

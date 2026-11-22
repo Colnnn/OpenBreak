@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Dispatching;
 
 namespace Afterbreak;
@@ -15,6 +16,7 @@ internal sealed partial class AfterbreakSession
     private readonly TaskStore tasks;
     private readonly CaptureOptions captureOptions;
     private readonly WindowAppearance appearance;
+    private readonly BreakDiagnostics? diagnostics;
     private BoardWindow? board;
     private CaptureSettingsWindow? captureSettings;
     private AppearanceSettingsWindow? appearanceSettings;
@@ -23,15 +25,18 @@ internal sealed partial class AfterbreakSession
     private Surface visible;
     private bool samplePreview;
     private long startedAt;
+    private long diagnosticStartedAt;
+    private TimeSpan diagnosticExpected;
     private nint returnWindow;
     private BoardWindow.CardFocus? captureCardFocus;
 
     internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
-        TimeProvider? reminderClock = null, bool captureMotionStudy = false)
+        TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null)
     {
         this.exit = exit;
+        this.diagnostics = diagnostics;
         this.tasks = tasks ?? TaskStore.ForCurrentUser();
-        capture = new CaptureWindow(SaveTask, Dismiss, captureMotionStudy);
+        capture = new CaptureWindow(SaveTask, () => Dismiss(), captureMotionStudy);
         warning = new WarningWindow(SnoozeReminder, SkipReminder);
         preview = new BreakWindow(EndVisibleBreak);
         timer = dispatcher.CreateTimer();
@@ -129,7 +134,7 @@ internal sealed partial class AfterbreakSession
                 StopScheduledSurfaceForInput();
                 if (visible is Surface.Warning or Surface.Preview)
                 {
-                    Dismiss();
+                    Dismiss("open-tasks");
                 }
 
                 if (board is null)
@@ -159,7 +164,7 @@ internal sealed partial class AfterbreakSession
                 }
 
                 StopScheduledSurfaceForInput();
-                Dismiss();
+                Dismiss("capture-command");
                 SetCaptureSource(source, bookmark);
                 if (!capture.TryShow(source))
                 {
@@ -180,6 +185,7 @@ internal sealed partial class AfterbreakSession
                 Dismiss();
                 if (!warning.TryShow(source))
                 {
+                    diagnostics?.Write("event=not-shown phase=Warning mode=manual reason=warning-placement");
                     return;
                 }
                 BeginManualPreview(source, sample: command == TrayCommand.PreviewSampleBoard);
@@ -193,7 +199,7 @@ internal sealed partial class AfterbreakSession
                 {
                     PersistCheckpoint();
                 }
-                Dismiss();
+                Dismiss("quit");
                 appearance.Dispose();
                 desktop.Dispose();
                 capture.Close();
@@ -335,6 +341,31 @@ internal sealed partial class AfterbreakSession
     {
         startedAt = Stopwatch.GetTimestamp();
         timer.Start();
+        TraceBreakShown(PreviewLength);
+    }
+
+    private void TraceBreakShown(TimeSpan expected)
+    {
+        if (diagnostics is null)
+        {
+            return;
+        }
+        diagnosticStartedAt = Stopwatch.GetTimestamp();
+        diagnosticExpected = expected;
+        TraceBreak("shown");
+    }
+
+    private void TraceBreak(string kind, string? reason = null)
+    {
+        if (diagnostics is null || visible is not (Surface.Warning or Surface.Preview))
+        {
+            return;
+        }
+        var mode = scheduledSurface ? "scheduled" : samplePreview ? "sample" : "manual";
+        var elapsed = Stopwatch.GetElapsedTime(diagnosticStartedAt);
+        var placement = visible == Surface.Warning ? warning.DescribePlacement() : preview.DescribePlacement();
+        diagnostics.Write(FormattableString.Invariant(
+            $"event={kind} phase={visible} mode={mode} reason={reason ?? "none"} elapsedMs={elapsed.TotalMilliseconds:F0} expectedMs={diagnosticExpected.TotalMilliseconds:F0} foreground={preview.HasForeground} trayForeground={desktop.TrayFlyoutHasForeground} manualPause={reminders.ManuallyPaused} {desktop.LastBreakEligibility} {placement}"));
     }
 
     private BoardWindow.CardFocus? FocusedBoardCard(nint source) =>
@@ -352,14 +383,14 @@ internal sealed partial class AfterbreakSession
         {
             return;
         }
-        if (EndIfPlacementInvalid())
+        if (EndIfPlacementInvalid("manual-tick"))
         {
             return;
         }
         if (!ManualPreviewAllowed(checkPresentation: visible != Surface.Preview ||
             (!preview.HasForeground && !desktop.TrayFlyoutHasForeground)))
         {
-            Dismiss();
+            Dismiss("manual-tick-eligibility");
             return;
         }
         if (desktop.MenuOpen)
@@ -389,13 +420,13 @@ internal sealed partial class AfterbreakSession
             preview.SetPreview(ReadBreakView(samplePreview));
             if (!ManualPreviewAllowed(checkPresentation: true) || !warning.PlacementIsCurrent)
             {
-                Dismiss();
+                Dismiss("manual-before-break-eligibility-or-warning-placement");
                 return;
             }
             var source = desktop.WorkWindow();
             if (!preview.TryShow(source))
             {
-                Dismiss();
+                Dismiss("manual-break-placement");
                 return;
             }
             returnWindow = source;
@@ -405,7 +436,7 @@ internal sealed partial class AfterbreakSession
         }
         else if (visible == Surface.Preview)
         {
-            Dismiss();
+            Dismiss("manual-tick-expired");
         }
     }
 
@@ -467,8 +498,9 @@ internal sealed partial class AfterbreakSession
         return true;
     }
 
-    private void Dismiss()
+    private void Dismiss([CallerMemberName] string reason = "")
     {
+        TraceBreak("dismiss", reason);
         var closing = visible;
         scheduledSurface = false;
         visible = Surface.None;

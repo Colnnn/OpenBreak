@@ -61,14 +61,18 @@ namespace Afterbreak
         public ReminderPause SystemPause { get; set; }
         public Func<ReminderPause>? CheckSystemPause { get; set; }
         public event Action<TrayCommand, nint>? Command;
-        public event Action? EligibilityChanged;
+        public event Action<string>? EligibilityChanged;
         public event Action? DisplaysChanged;
 
         public ReminderPause GetSystemPause(bool checkPresentation)
         {
             LastPresentationCheck = checkPresentation;
-            return CheckSystemPause?.Invoke() ?? SystemPause;
+            var pause = CheckSystemPause?.Invoke() ?? SystemPause;
+            LastBreakEligibility = new(pause, true, checkPresentation ? 0 : null,
+                checkPresentation ? pause == ReminderPause.Presentation ? 2 : 5 : null);
+            return pause;
         }
+        public BreakEligibilitySample LastBreakEligibility { get; private set; }
         public nint WorkSource { get; set; } = 30;
         public nint WorkWindow() => WorkSource;
         public void ConfigureTrayFlyout(WindowAppearance appearance, Func<nint, Action<TrayCommand>> bindCommand) =>
@@ -86,7 +90,7 @@ namespace Afterbreak
         public void DismissTray() => MenuOpen = false;
         public void RefreshTrayFlyout() { }
         public void Send(TrayCommand command, nint source = 10) => Command?.Invoke(command, source);
-        public void ChangeEligibility() => EligibilityChanged?.Invoke();
+        public void ChangeEligibility(string reason = "session-change") => EligibilityChanged?.Invoke(reason);
         public void ChangeDisplays() => DisplaysChanged?.Invoke();
         public void RefreshShortcutTip() { }
         public void Dispose()
@@ -234,6 +238,7 @@ namespace Afterbreak
         }
 
         public void Update(int seconds) => Seconds = seconds;
+        public string DescribePlacement() => $"visible={IsVisible} areaMatches={PlacementIsCurrent}";
     }
 
     internal sealed class BreakWindow : TestSurface
@@ -253,6 +258,7 @@ namespace Afterbreak
         public bool CanPlace { get; set; } = true;
         public bool RetainedDisplayAvailable { get; set; } = true;
         public bool PlacementIsCurrent => IsVisible && RetainedDisplayAvailable;
+        public string DescribePlacement() => $"visible={IsVisible} areaMatches={RetainedDisplayAvailable}";
         public int Attempts { get; private set; }
         public void StopSceneEntrance() { }
 

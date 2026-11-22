@@ -15,6 +15,7 @@ internal static class Program
         SleepAndInterruption();
         ClockAndHours();
         Restart();
+        ExplicitWorkPause();
     }
 
     private static void CadenceAndSnooze()
@@ -168,6 +169,65 @@ internal static class Program
         scheduler = new ReminderScheduler(clock, settings with { Enabled = false }, saved);
         Expect(scheduler.ManuallyPaused && scheduler.Phase == ReminderPhase.Work,
             "presentation pause survives restart even with scheduled reminders off");
+    }
+
+    private static void ExplicitWorkPause()
+    {
+        var clock = new TestClock(Noon);
+        var settings = ShortCycle with { WorkSeconds = 30, WorkingHours = true };
+        var scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 15);
+        Expect(scheduler.SetWorkPause(true, ReminderPause.None) && scheduler.Remaining.TotalSeconds == 15,
+            "work pause freezes the partially used work interval");
+        scheduler.SetManualPause(true);
+        clock.Advance(TimeSpan.FromHours(8));
+        scheduler.Update(ReminderPause.Locked | ReminderPause.Suspended);
+        var system = ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.OutsideHours | ReminderPause.Manual;
+        Expect(scheduler.PausedBy == (system | ReminderPause.Work) && scheduler.Remaining.TotalSeconds == 15,
+            "work pause retains time through hours, presentation, lock and sleep");
+
+        var saved = scheduler.Checkpoint();
+        clock.Advance(TimeSpan.FromDays(2));
+        scheduler = new ReminderScheduler(clock, settings, saved);
+        scheduler.Update(ReminderPause.Locked | ReminderPause.Suspended);
+        Expect(scheduler.WorkPaused && scheduler.SetWorkPause(false, ReminderPause.Locked | ReminderPause.Suspended) &&
+            scheduler.PausedBy == system && scheduler.Remaining.TotalSeconds == 15,
+            "restart restores frozen work, and resume clears only the work pause");
+
+        clock = new TestClock(Noon);
+        scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 30);
+        Expect(!scheduler.SetWorkPause(true, ReminderPause.None), "the warning cannot be paused as work");
+        scheduler.Snooze();
+        Step(scheduler, clock, 22);
+        scheduler.SetWorkPause(true, ReminderPause.None);
+        saved = scheduler.Checkpoint() with { CompletedShorts = 3 };
+        clock.Advance(TimeSpan.FromDays(3));
+        var updated = settings with { WorkSeconds = 21 };
+        scheduler = new ReminderScheduler(clock, settings, saved).WithSettings(updated);
+        scheduler.Update(ReminderPause.None);
+        Expect(scheduler.WorkPaused && scheduler.Phase == ReminderPhase.Snoozed && scheduler.Remaining.TotalSeconds == 278 &&
+            scheduler.IsLongBreak && scheduler.Settings == updated,
+            "restart and timing edits preserve the paused snooze and its cadence");
+        scheduler.SetManualPause(true);
+        var stopped = scheduler.WithSettings(updated with { Enabled = false });
+        var started = stopped.WithSettings(updated);
+        started.Update(ReminderPause.None);
+        Expect(!stopped.WorkPaused && !started.WorkPaused && started.ManuallyPaused && started.Phase == ReminderPhase.Work &&
+            started.Remaining.TotalSeconds == 21 && started.CompletedShorts == 0,
+            "stop clears the work pause and start uses fresh configured work while retaining presentation pause");
+
+        clock = new TestClock(Noon);
+        scheduler = new ReminderScheduler(clock, settings);
+        Step(scheduler, clock, 2);
+        scheduler.SetWorkPause(true, ReminderPause.None);
+        scheduler = scheduler.WithSettings(updated);
+        scheduler.SetWorkPause(false, ReminderPause.None);
+        saved = scheduler.Checkpoint();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        scheduler = new ReminderScheduler(clock, updated, saved);
+        Expect(scheduler.Settings == updated && scheduler.Remaining.TotalSeconds == 28 && !scheduler.WorkPaused,
+            "a quick restart after resume preserves the current interval before using the newly configured duration");
     }
 
     private static void Step(ReminderScheduler scheduler, TestClock clock, int seconds, ReminderPause reasons = ReminderPause.None)

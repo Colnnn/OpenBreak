@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../AfterbreakSession.cs" Link="AfterbreakSession.cs" />
     <Compile Include="../../ReminderSession.cs" Link="ReminderSession.cs" />
+    <Compile Include="../../FocusSnapshot.cs" Link="FocusSnapshot.cs" />
     <Compile Include="../../TrayMenuState.cs" Link="TrayMenuState.cs" />
     <Compile Include="../../BreakView.cs" Link="BreakView.cs" />
     <Compile Include="../../BreakDiagnostics.cs" Link="BreakDiagnostics.cs" />

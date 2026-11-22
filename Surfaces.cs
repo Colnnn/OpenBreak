@@ -342,6 +342,8 @@ internal sealed class WarningWindow : Window
 
     internal void ShowPrepared() => AppWindow.Show(activateWindow: false);
 
+    internal void ShowSaveError(string message) => detail.Text = message;
+
     internal bool PlacementIsCurrent => SurfaceWindow.IsCurrent(this, placement);
     internal string DescribePlacement() => SurfaceWindow.DescribePlacement(this, placement);
 
@@ -411,6 +413,8 @@ internal sealed class BreakWindow : Window
     private bool animateScene;
     private bool shellFullscreenExcluded;
     private SurfacePlacement placement;
+
+    internal void ShowSaveError(string message) => title.Text = message;
 
     internal BreakWindow(Action dismiss)
     {

@@ -23,6 +23,8 @@ internal static class Program
             CheckAppearanceSettings(Path.Combine(temporary.FullName, "appearance.db"));
             CheckMainNavigation(Path.Combine(temporary.FullName, "unified-shell.db"));
             CheckLaunchReveal(Path.Combine(temporary.FullName, "launch-reveal.db"));
+            CheckFocusHome(Path.Combine(temporary.FullName, "focus-home.db"));
+            CheckQuietReminderActionFailure(Path.Combine(temporary.FullName, "quiet-reminder-error.db"));
             PlacementLifecycleChecks.Run(temporary.FullName);
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
@@ -640,8 +642,8 @@ internal static class Program
             "a quiet start leaves the main window unopened with reminders still off");
         session.RevealFromLaunch();
         var host = MainWindow.Current;
-        Check(host.IsVisible && host.LastActivate && host.CurrentPage == ManagementPage.Tasks && tray.MainHandle == host.Handle,
-            "a normal launch reveals the Tasks page in the main window");
+        Check(host.IsVisible && host.LastActivate && host.CurrentPage == ManagementPage.Focus && tray.MainHandle == host.Handle,
+            "a normal launch reveals the Focus page in the main window");
 
         host.Navigate(ManagementPage.Breaks);
         var draft = host.Breaks.Draft with { WorkSeconds = 175 };
@@ -683,6 +685,183 @@ internal static class Program
         BreakWindow.Current.End();
         Check(SurfaceWindow.Returned == breakSource && !BreakWindow.Current.IsVisible,
             "ending the break after a reveal still returns to the original work window");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckFocusHome(string path)
+    {
+        var store = new TaskStore(path);
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var settings = ReminderSettings.Default with { WorkSeconds = 12, ShortSeconds = 3, LongSeconds = 8 };
+        var initial = new ReminderScheduler(clock, settings).Checkpoint();
+        store.SaveReminders(settings, initial);
+        store.Add("First task", "Open the file");
+        store.Add("In-progress task", "Check the last line");
+        var active = store.List(archived: false)[1];
+        store.Move(active.Id, TaskStatus.InProgress);
+        var queue = new DispatcherQueue();
+        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        session.RevealFromLaunch();
+        var tray = Desktop.Current;
+        var host = MainWindow.Current;
+        var focus = host.FocusHome;
+        Check(focus.Snapshot is { Enabled: false, Seconds: 12, NextTask.Title: "In-progress task" } &&
+            store.LoadReminders() == (settings, initial) && !host.DefersReminders,
+            "opening Focus shows configured idle duration and the actual return task without opting in");
+
+        using var rejection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        rejection.Open();
+        using var trigger = rejection.CreateCommand();
+        void RejectWrites(bool reject)
+        {
+            trigger.CommandText = reject
+                ? "CREATE TRIGGER reject_focus BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(ABORT, 'write failure'); END;"
+                : "DROP TRIGGER reject_focus;";
+            trigger.ExecuteNonQuery();
+        }
+        void Tick(int seconds)
+        {
+            for (var i = 0; i < seconds; i++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                queue.Timers[1].Fire();
+            }
+        }
+        bool Can(FocusAction action) => (focus.Snapshot.Actions & action) == action;
+
+        focus.Navigate(ManagementPage.Breaks);
+        host.Breaks.Draft = settings with { WorkSeconds = 42 };
+        host.Navigate(ManagementPage.Focus);
+        RejectWrites(true);
+        Check(focus.Execute(FocusAction.Start) is not null && !focus.Snapshot.Enabled && store.LoadReminders() == (settings, initial),
+            "a failed Focus start leaves runtime and durable configuration unchanged");
+        RejectWrites(false);
+        Check(focus.Execute(FocusAction.Start) is null && focus.Snapshot is { Enabled: true, Seconds: 12 } &&
+            host.Breaks.Draft == (settings with { Enabled = true, WorkSeconds = 42 }),
+            "Focus start opts in using saved timing and rebases the enabled toggle without losing a settings draft");
+        store.Edit(active.Id, "Updated task", "Keep going");
+        Tick(4);
+        Check(focus.Snapshot is { Phase: ReminderPhase.Work, Seconds: 8, NextTask.Title: "In-progress task" },
+            "the Focus countdown uses the scheduler tick and keeps cached task data between visits");
+        focus.Navigate(ManagementPage.Tasks);
+        host.Navigate(ManagementPage.Focus);
+        Check(focus.Snapshot.NextTask?.Title == "Updated task", "returning from Tasks refreshes the saved task card");
+
+        var beforePause = store.LoadReminders();
+        RejectWrites(true);
+        Check(focus.Execute(FocusAction.Pause) is not null && Can(FocusAction.Pause) && store.LoadReminders() == beforePause,
+            "a rejected work-pause write leaves the running interval and saved checkpoint untouched");
+        RejectWrites(false);
+        Check(focus.Execute(FocusAction.Pause) is null && Can(FocusAction.Resume | FocusAction.Preview) &&
+            store.LoadReminders().Checkpoint is { WorkPaused: true, Remaining.TotalSeconds: 8 },
+            "work pause immediately saves the remaining interval and keeps preview eligible");
+        Check(focus.Execute(FocusAction.Preview) is null && focus.Snapshot is { PreviewPhase: ReminderPhase.Warning, Seconds: 8 } &&
+            Can(FocusAction.CancelPreview) && WarningWindow.Current.IsVisible,
+            "a manual preview reports its own warning while the scheduled work countdown remains frozen");
+        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
+        queue.Timer.Fire();
+        Check(focus.Snapshot is { PreviewPhase: ReminderPhase.Break, Seconds: 8, CompletedShorts: 0 } &&
+            focus.Execute(FocusAction.CancelPreview) is null && focus.Snapshot.PreviewPhase is null,
+            "the manual break has its own phase and cancel leaves scheduled cadence intact");
+
+        tray.Send(TrayCommand.TogglePause);
+        tray.SystemPause = ReminderPause.Locked;
+        tray.ChangeEligibility();
+        Tick(35);
+        var overlap = ReminderPause.Work | ReminderPause.Manual | ReminderPause.Locked;
+        Check(focus.Snapshot is { Seconds: 8 } && focus.Snapshot.PausedBy == overlap && !Can(FocusAction.Preview),
+            "Focus reports all overlapping pauses while presentation and Windows block preview");
+        tray.Send(TrayCommand.Quit);
+        queue = new DispatcherQueue();
+        session = new AfterbreakSession(queue, () => { }, store, clock);
+        session.RevealFromLaunch();
+        tray = Desktop.Current;
+        focus = MainWindow.Current.FocusHome;
+        tray.SystemPause = ReminderPause.Locked;
+        tray.ChangeEligibility();
+        Check(focus.Snapshot is { Enabled: true, Seconds: 8 } && focus.Snapshot.PausedBy == overlap &&
+            focus.Execute(FocusAction.Resume) is null && focus.Snapshot.PausedBy == (overlap & ~ReminderPause.Work),
+            "restart restores Work pause, and Focus resume leaves presentation and Windows reasons in force");
+        tray.SystemPause = ReminderPause.None;
+        tray.ChangeEligibility();
+        tray.Send(TrayCommand.TogglePause);
+        Tick(8);
+        Check(focus.Snapshot.Phase == ReminderPhase.Warning && Can(FocusAction.Snooze | FocusAction.Skip) && !Can(FocusAction.Pause),
+            "a due warning exposes snooze and skip instead of Work pause");
+        Check(focus.Execute(FocusAction.Snooze) is null && focus.Snapshot is { Phase: ReminderPhase.Snoozed, Seconds: 300 } &&
+            focus.Execute(FocusAction.Skip) is null && focus.Snapshot is { Phase: ReminderPhase.Work, Seconds: 12 },
+            "Focus snooze and skip use the scheduled warning transitions");
+        Tick(22);
+        Check(focus.Snapshot is { Phase: ReminderPhase.Break, Seconds: 3 } && Can(FocusAction.EndBreak) &&
+            focus.Execute(FocusAction.EndBreak) is null && focus.Snapshot is { Phase: ReminderPhase.Work, CompletedShorts: 0 },
+            "ending a scheduled break from Focus retains the existing early-end cadence rule");
+
+        focus.Execute(FocusAction.Pause);
+        var beforeStop = store.LoadReminders();
+        RejectWrites(true);
+        Check(focus.Execute(FocusAction.Stop) is not null && Can(FocusAction.Resume) && store.LoadReminders() == beforeStop,
+            "a rejected Focus stop retains both opt-in and work pause");
+        RejectWrites(false);
+        Check(focus.Execute(FocusAction.Stop) is null && !focus.Snapshot.Enabled &&
+            store.LoadReminders() is { Settings.Enabled: false, Checkpoint.WorkPaused: false } &&
+            focus.Execute(FocusAction.Start) is null && focus.Snapshot is { Seconds: 12, PausedBy: ReminderPause.None },
+            "Focus stop disables reminders and clears work pause before the next fresh start");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckQuietReminderActionFailure(string path)
+    {
+        var store = new TaskStore(path);
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var queue = new DispatcherQueue();
+        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        var tray = Desktop.Current;
+
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        connection.Open();
+        using var trigger = connection.CreateCommand();
+        void RejectWrites(bool reject)
+        {
+            trigger.CommandText = reject
+                ? "CREATE TRIGGER reject_action BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(IGNORE); END;"
+                : "DROP TRIGGER reject_action;";
+            trigger.ExecuteNonQuery();
+        }
+        void Tick(int seconds)
+        {
+            for (var i = 0; i < seconds; i++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                queue.Timers[1].Fire();
+            }
+        }
+
+        Tick(5);
+        var warning = WarningWindow.Current;
+        var checkpoint = store.LoadReminders();
+        RejectWrites(true);
+        warning.Snooze();
+        Check(tray.MainHandle == 0 && warning.IsVisible && warning.SaveError == tray.ReminderStatus && warning.SaveError is not null &&
+            store.LoadReminders() == checkpoint, "quiet-start warning reports an ignored snooze without revealing the app or mutating the reminder");
+        RejectWrites(false);
+        warning.Snooze();
+        Check(!warning.IsVisible && store.LoadReminders().Checkpoint?.Phase == ReminderPhase.Snoozed,
+            "retry from the warning saves one snooze after storage recovers");
+
+        Tick(310);
+        var overlay = BreakWindow.Current;
+        checkpoint = store.LoadReminders();
+        RejectWrites(true);
+        overlay.End();
+        Check(tray.MainHandle == 0 && overlay.IsVisible && overlay.SaveError == tray.ReminderStatus && overlay.SaveError is not null &&
+            store.LoadReminders() == checkpoint, "quiet-start break reports an ignored early end and retains the running break");
+        RejectWrites(false);
+        overlay.End();
+        Check(!overlay.IsVisible && store.LoadReminders().Checkpoint is { Phase: ReminderPhase.Work, CompletedShorts: 0 },
+            "retry from the break keeps the previous cadence and returns to work");
         tray.Send(TrayCommand.Quit);
     }
 }

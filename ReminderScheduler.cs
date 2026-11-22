@@ -43,12 +43,16 @@ internal enum ReminderPause
     Presentation = 8,
     Interaction = 16,
     OutsideHours = 32,
+    Work = 64,
 }
 
 internal enum ReminderPhase { Work, Snoozed, Warning, Break }
 
 internal sealed record ReminderCheckpoint(ReminderPhase Phase, TimeSpan Remaining, int CompletedShorts,
-    bool ManuallyPaused, TimeSpan Away, DateTimeOffset SavedAt);
+    bool ManuallyPaused, TimeSpan Away, DateTimeOffset SavedAt)
+{
+    internal bool WorkPaused { get; init; }
+}
 
 internal sealed class ReminderScheduler
 {
@@ -77,6 +81,13 @@ internal sealed class ReminderScheduler
         }
 
         CompletedShorts = saved.CompletedShorts;
+        if (saved.WorkPaused)
+        {
+            Phase = saved.Phase;
+            Remaining = saved.Remaining;
+            PausedBy |= ReminderPause.Work;
+            return;
+        }
         var elapsed = clock.GetUtcNow() - saved.SavedAt;
         var previousWindow = settings.WindowOn(TimeZoneInfo.ConvertTime(saved.SavedAt, clock.LocalTimeZone));
         if (elapsed >= TimeSpan.Zero && elapsed + saved.Away < BreakLength && workingWindow is not null &&
@@ -84,8 +95,8 @@ internal sealed class ReminderScheduler
             saved.Phase is ReminderPhase.Work or ReminderPhase.Snoozed)
         {
             Phase = saved.Phase;
-            var limit = Phase == ReminderPhase.Work ? settings.WorkLength : SnoozeLength;
-            Remaining = saved.Remaining <= limit ? saved.Remaining : limit;
+            // A duration change during a work pause is applied to subsequent intervals.
+            Remaining = Phase == ReminderPhase.Snoozed && saved.Remaining > SnoozeLength ? SnoozeLength : saved.Remaining;
             away = elapsed + saved.Away;
         }
     }
@@ -95,6 +106,7 @@ internal sealed class ReminderScheduler
     internal ReminderPause PausedBy { get; private set; }
     internal TimeSpan Remaining { get; private set; }
     internal bool ManuallyPaused { get; private set; }
+    internal bool WorkPaused => (PausedBy & ReminderPause.Work) != 0;
     internal int CompletedShorts { get; private set; }
     internal bool IsLongBreak => CompletedShorts == 3;
     private TimeSpan BreakLength => Settings.BreakLength(CompletedShorts);
@@ -110,14 +122,25 @@ internal sealed class ReminderScheduler
         }
 
         var window = Settings.WindowOn(clock.GetLocalNow());
+        var workPaused = WorkPaused;
         var pauses = environment | (window is null ? ReminderPause.OutsideHours : ReminderPause.None) |
-            (ManuallyPaused ? ReminderPause.Manual : ReminderPause.None);
+            (ManuallyPaused ? ReminderPause.Manual : ReminderPause.None) |
+            (workPaused ? ReminderPause.Work : ReminderPause.None);
         if (window != workingWindow)
         {
-            StartWork();
+            if (!workPaused)
+            {
+                StartWork();
+            }
             away = TimeSpan.Zero;
             workingWindow = window;
             elapsed = TimeSpan.Zero;
+        }
+
+        if (workPaused)
+        {
+            PausedBy = pauses;
+            return;
         }
 
         if ((PausedBy & AwayReasons) != 0 || (PausedBy == ReminderPause.None && elapsed > LongTickGap))
@@ -190,11 +213,31 @@ internal sealed class ReminderScheduler
 
     internal void SetManualPause(bool paused) => ManuallyPaused = paused;
 
+    internal bool SetWorkPause(bool paused, ReminderPause environment)
+    {
+        if (!Settings.Enabled || Phase is not (ReminderPhase.Work or ReminderPhase.Snoozed) || WorkPaused == paused)
+        {
+            return false;
+        }
+
+        Update(environment);
+        if (Phase is not (ReminderPhase.Work or ReminderPhase.Snoozed) || Remaining <= TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        PausedBy = paused ? PausedBy | ReminderPause.Work : PausedBy & ~ReminderPause.Work;
+        away = TimeSpan.Zero;
+        return true;
+    }
+
+    internal ReminderScheduler Copy() => (ReminderScheduler)MemberwiseClone();
+
     internal void StartVisibleCountdown() => lastTick = clock.GetTimestamp();
 
     internal ReminderScheduler WithSettings(ReminderSettings settings)
     {
-        var candidate = (ReminderScheduler)MemberwiseClone();
+        var candidate = Copy();
         candidate.ApplySettings(settings);
         return candidate;
     }
@@ -208,17 +251,25 @@ internal sealed class ReminderScheduler
             return;
         }
 
+        if (settings.Enabled && WorkPaused)
+        {
+            return;
+        }
+
         if (!old.Enabled || !settings.Enabled)
         {
             CompletedShorts = 0;
         }
         StartWork();
         workingWindow = settings.WindowOn(clock.GetLocalNow());
-        PausedBy = ReminderPause.None;
+        PausedBy = ManuallyPaused ? ReminderPause.Manual : ReminderPause.None;
         away = TimeSpan.Zero;
     }
 
-    internal ReminderCheckpoint Checkpoint() => new(Phase, Remaining, CompletedShorts, ManuallyPaused, away, clock.GetUtcNow());
+    internal ReminderCheckpoint Checkpoint() => new(Phase, Remaining, CompletedShorts, ManuallyPaused, away, clock.GetUtcNow())
+    {
+        WorkPaused = WorkPaused,
+    };
 
     private void InterruptVisiblePhase()
     {

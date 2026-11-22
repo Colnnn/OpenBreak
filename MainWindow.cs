@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Input;
 
 namespace Afterbreak;
 
-internal enum ManagementPage { Tasks, Breaks, Capture, Appearance }
+internal enum ManagementPage { Focus, Tasks, Breaks, Capture, Appearance }
 
 internal sealed class MainWindow : Window
 {
@@ -25,9 +25,10 @@ internal sealed class MainWindow : Window
     private bool quitting;
     private bool tasksNeedRefresh = true;
 
-    internal MainWindow(TasksPage tasks, ReminderSettingsPage breaks, CaptureSettingsPage capture,
+    internal MainWindow(FocusPage focus, TasksPage tasks, ReminderSettingsPage breaks, CaptureSettingsPage capture,
         AppearanceSettingsPage appearance)
     {
+        FocusHome = focus;
         Tasks = tasks;
         Breaks = breaks;
         Capture = capture;
@@ -36,6 +37,7 @@ internal sealed class MainWindow : Window
         Title = "Afterbreak";
 
         var body = new Grid();
+        AddPage(ManagementPage.Focus, "Focus", Symbol.Play, focus);
         AddPage(ManagementPage.Tasks, "Tasks", Symbol.List, tasks);
         navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Settings" });
         AddPage(ManagementPage.Breaks, "Breaks", Symbol.Clock, breaks);
@@ -50,7 +52,7 @@ internal sealed class MainWindow : Window
                 Navigate(page);
             }
         };
-        navigation.SelectedItem = pages[ManagementPage.Tasks].Item;
+        navigation.SelectedItem = pages[ManagementPage.Focus].Item;
 
         AppWindow.Closing += (_, args) =>
         {
@@ -64,13 +66,14 @@ internal sealed class MainWindow : Window
         void AddPage(ManagementPage page, string label, Symbol icon, UserControl content)
         {
             var item = new NavigationViewItem { Content = label, Icon = new SymbolIcon(icon), Tag = page };
-            content.Visibility = page == ManagementPage.Tasks ? Visibility.Visible : Visibility.Collapsed;
+            content.Visibility = page == ManagementPage.Focus ? Visibility.Visible : Visibility.Collapsed;
             pages.Add(page, (item, content));
             navigation.MenuItems.Add(item);
             body.Children.Add(content);
         }
     }
 
+    internal FocusPage FocusHome { get; }
     internal TasksPage Tasks { get; }
     internal ReminderSettingsPage Breaks { get; }
     internal CaptureSettingsPage Capture { get; }
@@ -146,6 +149,7 @@ internal sealed class MainWindow : Window
 
     internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
     {
+        FocusHome.ApplyAppearance(state);
         Tasks.ApplyAppearance(state, theme);
         Breaks.ApplyAppearance(state);
     }

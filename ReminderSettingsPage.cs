@@ -145,6 +145,15 @@ internal sealed class ReminderSettingsPage : UserControl
         saved = saved with { BreakDisplay = display };
     }
 
+    internal void RebaseEnabled(bool isEnabled)
+    {
+        if (enabled.IsOn == saved.Enabled)
+        {
+            enabled.IsOn = isEnabled;
+        }
+        saved = saved with { Enabled = isEnabled };
+    }
+
     internal void SetStatus(string description)
     {
         if (status.Text != description)

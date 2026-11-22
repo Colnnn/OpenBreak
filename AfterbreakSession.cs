@@ -129,21 +129,11 @@ internal sealed partial class AfterbreakSession
                 visible = Surface.Capture;
                 desktop.PreviewAvailable = false;
                 capture.StartCaptureEntrance();
+                PublishFocusSnapshot();
                 break;
             case TrayCommand.Preview:
             case TrayCommand.PreviewSampleBoard:
-                if (visible != Surface.None || !ManualPreviewAllowed(checkPresentation: true))
-                {
-                    return;
-                }
-
-                Dismiss();
-                if (!warning.TryShow(source))
-                {
-                    diagnostics?.Write("event=not-shown phase=Warning mode=manual reason=warning-placement");
-                    return;
-                }
-                BeginManualPreview(source, sample: command == TrayCommand.PreviewSampleBoard);
+                TryStartManualPreview(source, sample: command == TrayCommand.PreviewSampleBoard);
                 break;
             case TrayCommand.EndBreak:
                 EndVisibleBreak();
@@ -180,6 +170,8 @@ internal sealed partial class AfterbreakSession
     {
         if (main is null)
         {
+            var focusPage = new FocusPage(ExecuteFocusAction, page => main?.Navigate(page));
+            focusPage.SetActionError(reminderActionError);
             var tasksPage = new TasksPage(tasks, () => Execute(TrayCommand.Capture, desktop.MainHandle));
             var breaksPage = new ReminderSettingsPage(SaveSettings);
             var capturePage = new CaptureSettingsPage(ApplyCaptureShortcut, captureOptions.DismissGuide, SaveAndPreviewGuide);
@@ -188,12 +180,13 @@ internal sealed partial class AfterbreakSession
             breaksPage.SetStatus(desktop.ReminderStatus);
             capturePage.SetPreferences(captureOptions.Preferences, captureOptions.Status, reminders.Settings.BreakDisplay);
             appearancePage.SetPreferences(appearancePreferences, appearanceLoadFailed);
-            main = new MainWindow(tasksPage, breaksPage, capturePage, appearancePage);
+            main = new MainWindow(focusPage, tasksPage, breaksPage, capturePage, appearancePage);
             main.PageVisited += RefreshPageAfterLoadFailure;
             desktop.MainHandle = main.Handle;
             appearance.Track(main, SurfaceMaterial.Mica);
         }
         main.TryShow(source, page, activate);
+        UpdateReminderTimer();
     }
 
     private void RefreshPageAfterLoadFailure(ManagementPage page)
@@ -204,6 +197,9 @@ internal sealed partial class AfterbreakSession
         }
         switch (page)
         {
+            case ManagementPage.Focus:
+                RefreshFocusTask();
+                break;
             case ManagementPage.Breaks when reminderLoadError && !main.Breaks.IsDirty:
                 TryLoadReminderSettings();
                 main.Breaks.SetForm(reminders.Settings, reminderStorageError);
@@ -220,6 +216,7 @@ internal sealed partial class AfterbreakSession
                 main.Appearance.SetPreferences(appearancePreferences, appearanceLoadFailed);
                 break;
         }
+        UpdateReminderTimer();
     }
 
     private string? SaveAndPreviewGuide(BreakDisplay display)
@@ -275,6 +272,23 @@ internal sealed partial class AfterbreakSession
         return null;
     }
 
+    private string? TryStartManualPreview(nint source, bool sample)
+    {
+        if (visible != Surface.None || !ManualPreviewAllowed(checkPresentation: true))
+        {
+            return "A break preview is unavailable right now.";
+        }
+
+        Dismiss();
+        if (!warning.TryShow(source))
+        {
+            diagnostics?.Write("event=not-shown phase=Warning mode=manual reason=warning-placement");
+            return "The preview warning couldn’t open. Try again.";
+        }
+        BeginManualPreview(source, sample);
+        return null;
+    }
+
     private void BeginManualPreview(nint source, bool sample)
     {
         samplePreview = sample;
@@ -283,6 +297,7 @@ internal sealed partial class AfterbreakSession
         desktop.PreviewAvailable = false;
         desktop.DismissLabel = "Cancel preview";
         StartClock();
+        PublishFocusSnapshot();
     }
 
     private void LoadAppearance()
@@ -400,7 +415,7 @@ internal sealed partial class AfterbreakSession
             return;
         }
 
-        var remaining = PreviewLength - Stopwatch.GetElapsedTime(startedAt);
+        var remaining = ManualPreviewRemaining;
         if (remaining > TimeSpan.Zero)
         {
             var seconds = (int)Math.Ceiling(remaining.TotalSeconds);
@@ -412,6 +427,7 @@ internal sealed partial class AfterbreakSession
             {
                 preview.Update(seconds);
             }
+            PublishFocusSnapshot();
             return;
         }
 
@@ -436,12 +452,15 @@ internal sealed partial class AfterbreakSession
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
             StartClock();
+            PublishFocusSnapshot();
         }
         else if (visible == Surface.Preview)
         {
             Dismiss("manual-tick-expired");
         }
     }
+
+    private TimeSpan ManualPreviewRemaining => PreviewLength - Stopwatch.GetElapsedTime(startedAt);
 
     private BreakView ReadBreakView(bool sample = false)
     {
@@ -495,6 +514,10 @@ internal sealed partial class AfterbreakSession
         var focus = captureFocus;
         Dismiss();
         main?.NotifyTaskCaptured(focus);
+        if (main?.CurrentPage == ManagementPage.Focus)
+        {
+            RefreshFocusTask();
+        }
         return true;
     }
 
@@ -522,6 +545,7 @@ internal sealed partial class AfterbreakSession
         }
         returnWindow = 0;
         captureFocus = null;
+        PublishFocusSnapshot();
         desktop.RefreshTrayFlyout();
     }
 }

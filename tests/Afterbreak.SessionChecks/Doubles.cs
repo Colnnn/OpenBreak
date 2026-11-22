@@ -17,6 +17,7 @@ namespace Microsoft.UI.Dispatching
     {
         public TimeSpan Interval { get; set; }
         public bool Running { get; private set; }
+        public bool IsRunning => Running;
         public event Action<DispatcherQueueTimer, object>? Tick;
 
         public void Start() => Running = true;
@@ -189,7 +190,12 @@ namespace Afterbreak
 
     internal sealed class WarningWindow : TestSurface
     {
-        public WarningWindow(Action snooze, Action skip) => Current = this;
+        public WarningWindow(Action snooze, Action skip)
+        {
+            Snooze = snooze;
+            Skip = skip;
+            Current = this;
+        }
 
         public static WarningWindow Current { get; private set; } = null!;
         public static int Shows { get; private set; }
@@ -200,6 +206,10 @@ namespace Afterbreak
         public int Attempts { get; private set; }
         public nint LastSource { get; private set; }
         public bool CanShowPrepared { get; set; } = true;
+        public Action Snooze { get; }
+        public Action Skip { get; }
+        public string? SaveError { get; private set; }
+        public void ShowSaveError(string message) => SaveError = message;
 
         public bool TryShow(nint source, string? breakKind = null)
         {
@@ -221,6 +231,7 @@ namespace Afterbreak
             LastSource = source;
             Seconds = 10;
             Kind = breakKind;
+            SaveError = null;
             PlacementIsCurrent = true;
             return true;
         }
@@ -257,6 +268,8 @@ namespace Afterbreak
         public static BreakLayout Layout { get; private set; }
         public static IReadOnlyList<BoardTask>? SavedTasks { get; private set; }
         public bool IsLong { get; private set; }
+        public string? SaveError { get; private set; }
+        public void ShowSaveError(string message) => SaveError = message;
         public int Seconds { get; private set; }
         public bool Foreground { get; set; } = true;
         public bool HasForeground => IsVisible && Foreground;
@@ -276,6 +289,7 @@ namespace Afterbreak
             Note = view.Task?.NextStep;
             SavedTasks = view.Tasks;
             IsLong = longBreak;
+            SaveError = null;
             Seconds = 10;
         }
 
@@ -308,14 +322,15 @@ namespace Afterbreak
         }
     }
 
-    internal enum ManagementPage { Tasks, Breaks, Capture, Appearance }
+    internal enum ManagementPage { Focus, Tasks, Breaks, Capture, Appearance }
 
-    internal sealed class MainWindow(TasksPage tasks, ReminderSettingsPage breaks,
+    internal sealed class MainWindow(FocusPage focus, TasksPage tasks, ReminderSettingsPage breaks,
         CaptureSettingsPage capture, AppearanceSettingsPage appearance) : TestSurface
     {
         internal readonly record struct FocusBookmark(ManagementPage Page, TasksPage.CardFocus? Card);
 
         public static MainWindow Current { get; private set; } = null!;
+        public FocusPage FocusHome { get; } = focus;
         public TasksPage Tasks { get; } = tasks;
         public ReminderSettingsPage Breaks { get; } = breaks;
         public CaptureSettingsPage Capture { get; } = capture;
@@ -395,6 +410,15 @@ namespace Afterbreak
         public void CloseForQuit() => Close();
     }
 
+    internal sealed class FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate)
+    {
+        public FocusSnapshot Snapshot { get; private set; } = null!;
+        public void SetSnapshot(FocusSnapshot snapshot) => Snapshot = snapshot;
+        public void SetActionError(string? message) { }
+        public string? Execute(FocusAction action) => execute(action);
+        public void Navigate(ManagementPage page) => navigate(page);
+    }
+
     internal sealed class TasksPage
     {
         internal enum CardAction { Edit, Move }
@@ -445,6 +469,15 @@ namespace Afterbreak
                 Draft = Draft with { BreakDisplay = display };
             }
             LoadedSettings = LoadedSettings with { BreakDisplay = display };
+        }
+
+        public void RebaseEnabled(bool enabled)
+        {
+            if (Draft.Enabled == LoadedSettings.Enabled)
+            {
+                Draft = Draft with { Enabled = enabled };
+            }
+            LoadedSettings = LoadedSettings with { Enabled = enabled };
         }
 
         public bool Save(ReminderSettings settings)

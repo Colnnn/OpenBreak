@@ -20,6 +20,10 @@ internal sealed partial class AfterbreakSession
     private bool scheduledSurface;
     private bool checkpointDirty;
     private long lastCheckpoint;
+    private ReminderPause systemPauseForFocus;
+    private BoardTask? nextFocusTask;
+    private bool focusTaskUnavailable;
+    private string? reminderActionError;
 
     private void InitializeReminders(DispatcherQueue dispatcher, TimeProvider clock)
     {
@@ -61,11 +65,13 @@ internal sealed partial class AfterbreakSession
 
     private void UpdateReminderTimer()
     {
-        if (reminders.Settings.Enabled && !reminderStorageError)
+        var shouldRun = (reminders.Settings.Enabled && !reminderStorageError) ||
+            main is { CurrentPage: ManagementPage.Focus, AppWindow.IsVisible: true };
+        if (shouldRun && !reminderTimer.IsRunning)
         {
             reminderTimer.Start();
         }
-        else
+        else if (!shouldRun && reminderTimer.IsRunning)
         {
             reminderTimer.Stop();
         }
@@ -113,6 +119,7 @@ internal sealed partial class AfterbreakSession
         }
 
         UpdateReminderStatus(systemPause);
+        UpdateReminderTimer();
     }
 
     private void SynchronizeScheduledSurface(bool wasShowingWarning)
@@ -209,7 +216,11 @@ internal sealed partial class AfterbreakSession
         }
 
         TraceBreak("placement-invalid", reason);
-        EndVisibleBreak();
+        if (scheduledSurface)
+        {
+            SkipForDisplayLoss();
+        }
+        Dismiss();
         return true;
     }
 
@@ -253,28 +264,48 @@ internal sealed partial class AfterbreakSession
     {
         if (reminders.Phase == ReminderPhase.Warning && !reminderStorageError)
         {
-            reminders.Snooze();
-            FinishReminderAction();
+            var candidate = reminders.Copy();
+            candidate.Snooze();
+            CompleteReminderAction(candidate);
         }
     }
 
     private void SkipReminder()
     {
-        if (reminders.Phase != ReminderPhase.Work && !reminderStorageError)
+        if (reminders.Phase != ReminderPhase.Work && !reminders.WorkPaused && !reminderStorageError)
         {
-            reminders.Skip();
-            FinishReminderAction();
+            var candidate = reminders.Copy();
+            candidate.Skip();
+            CompleteReminderAction(candidate);
         }
     }
 
-    private void FinishReminderAction()
+    private string? CompleteReminderAction(ReminderScheduler candidate)
     {
+        if (!TrySaveExplicitChange(candidate))
+        {
+            reminderActionError = "Couldn’t save. Try again.";
+            main?.FocusHome.SetActionError(reminderActionError);
+            if (scheduledSurface)
+            {
+                if (visible == Surface.Warning)
+                {
+                    warning.ShowSaveError(reminderActionError);
+                }
+                else
+                {
+                    preview.ShowSaveError(reminderActionError);
+                }
+            }
+            UpdateReminderStatus(systemPauseForFocus);
+            return reminderActionError;
+        }
         if (scheduledSurface)
         {
             Dismiss();
         }
-        PersistCheckpoint();
         UpdateScheduledReminders();
+        return null;
     }
 
     private bool SaveSettings(ReminderSettings settings)
@@ -285,16 +316,33 @@ internal sealed partial class AfterbreakSession
         }
 
         var candidate = reminders.WithSettings(settings);
-        if (!TryPersist(settings, candidate.Checkpoint()))
+        if (!TrySaveExplicitChange(candidate))
         {
             return false;
         }
 
-        reminders = candidate;
         main?.Capture.RebaseBreakDisplay(settings.BreakDisplay);
         reminderLoadError = false;
         UpdateReminderTimer();
         UpdateScheduledReminders();
+        return true;
+    }
+
+    private bool TrySaveExplicitChange(ReminderScheduler candidate)
+    {
+        try
+        {
+            tasks.SaveReminders(candidate.Settings, candidate.Checkpoint());
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            return false;
+        }
+        reminders = candidate;
+        reminders.StartVisibleCountdown();
+        OnCheckpointSaved();
+        reminderActionError = null;
+        main?.FocusHome.SetActionError(null);
         return true;
     }
 
@@ -329,9 +377,7 @@ internal sealed partial class AfterbreakSession
         try
         {
             tasks.SaveReminders(settings, checkpoint);
-            lastCheckpoint = reminderClock.GetTimestamp();
-            checkpointDirty = false;
-            reminderStorageError = false;
+            OnCheckpointSaved();
             return true;
         }
         catch (Exception exception) when (TaskStore.IsStorageError(exception))
@@ -342,13 +388,21 @@ internal sealed partial class AfterbreakSession
                 Dismiss();
             }
             UpdateReminderTimer();
-            UpdateReminderStatus(ReminderPause.None);
+            UpdateReminderStatus(systemPauseForFocus);
             return false;
         }
     }
 
+    private void OnCheckpointSaved()
+    {
+        lastCheckpoint = reminderClock.GetTimestamp();
+        checkpointDirty = false;
+        reminderStorageError = false;
+    }
+
     private void UpdateReminderStatus(ReminderPause systemPause)
     {
+        systemPauseForFocus = systemPause;
         var pauses = reminders.PausedBy;
         var phase = reminders.Phase;
         desktop.ManuallyPaused = reminders.ManuallyPaused;
@@ -356,15 +410,156 @@ internal sealed partial class AfterbreakSession
         desktop.SnoozeAvailable = !reminderStorageError && reminders.Settings.Enabled && !reminders.ManuallyPaused &&
             phase == ReminderPhase.Warning && (scheduledSurface || pauses == ReminderPause.Interaction);
         desktop.SkipAvailable = desktop.SnoozeAvailable ||
-            (!reminderStorageError && reminders.Settings.Enabled && phase == ReminderPhase.Snoozed);
-        desktop.ReminderStatus = reminders.ManuallyPaused ? "Paused for presentation" :
+            (!reminderStorageError && reminders.Settings.Enabled && !reminders.WorkPaused && phase == ReminderPhase.Snoozed);
+        desktop.ReminderStatus = reminderActionError ?? (reminders.ManuallyPaused ? "Paused for presentation" :
             reminderStorageError ? "Reminders unavailable · Check settings" :
             !reminders.Settings.Enabled ? "Reminders off" :
+            reminders.WorkPaused ? "Reminders on · Work paused" :
             (pauses & ReminderPause.OutsideHours) != 0 ? "Reminders on · Outside working hours" :
             ((pauses | systemPause) & (ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.Presentation)) != 0 ? "Reminders on · Paused by Windows" :
             phase == ReminderPhase.Snoozed ? "Reminders on · Snoozed" :
-            phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval";
+            phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval");
         main?.Breaks.SetStatus(desktop.ReminderStatus);
+        PublishFocusSnapshot();
         desktop.RefreshTrayFlyout();
+    }
+
+    private void RefreshFocusTask()
+    {
+        try
+        {
+            nextFocusTask = tasks.ReturnTask();
+            focusTaskUnavailable = false;
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            nextFocusTask = null;
+            focusTaskUnavailable = true;
+        }
+        PublishFocusSnapshot();
+    }
+
+    private void PublishFocusSnapshot()
+    {
+        if (main is not { CurrentPage: ManagementPage.Focus } host)
+        {
+            return;
+        }
+
+        ReminderPhase? previewPhase = !scheduledSurface ? visible switch
+        {
+            Surface.Warning => ReminderPhase.Warning,
+            Surface.Preview => ReminderPhase.Break,
+            _ => null,
+        } : null;
+        var settings = reminders.Settings;
+        var pauses = systemPauseForFocus | reminders.PausedBy |
+            (reminders.ManuallyPaused ? ReminderPause.Manual : ReminderPause.None);
+        if (settings.Enabled && settings.WindowOn(reminderClock.GetLocalNow()) is null)
+        {
+            pauses |= ReminderPause.OutsideHours;
+        }
+        if (settings.Enabled && IsEditingOrPreviewing())
+        {
+            pauses |= ReminderPause.Interaction;
+        }
+        host.FocusHome.SetSnapshot(new FocusSnapshot(settings.Enabled, reminders.Phase,
+            WholeSeconds(reminders.Remaining), pauses, reminders.CompletedShorts,
+            WholeSeconds(settings.BreakLength(reminders.CompletedShorts)), nextFocusTask, focusTaskUnavailable,
+            reminderStorageError, previewPhase, previewPhase is null ? 0 : WholeSeconds(ManualPreviewRemaining),
+            AvailableFocusActions(systemPauseForFocus)));
+    }
+
+    private static int WholeSeconds(TimeSpan remaining) => Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));
+
+    private FocusAction AvailableFocusActions(ReminderPause systemPause)
+    {
+        var actions = reminderLoadError ? FocusAction.None : reminders.Settings.Enabled ? FocusAction.Stop : FocusAction.Start;
+        if (visible == Surface.None && !reminderLoadError && !reminders.ManuallyPaused && systemPause == ReminderPause.None)
+        {
+            actions |= FocusAction.Preview;
+        }
+        if (!scheduledSurface && visible is (Surface.Warning or Surface.Preview))
+        {
+            return actions | FocusAction.CancelPreview;
+        }
+        if (!reminders.Settings.Enabled || reminderStorageError || visible == Surface.Capture)
+        {
+            return actions;
+        }
+
+        if (reminders.Phase is ReminderPhase.Work or ReminderPhase.Snoozed)
+        {
+            actions |= reminders.WorkPaused ? FocusAction.Resume : FocusAction.Pause;
+            if (!reminders.WorkPaused && reminders.Phase == ReminderPhase.Snoozed)
+            {
+                actions |= FocusAction.Skip;
+            }
+        }
+        else if (reminders.Phase == ReminderPhase.Warning && (scheduledSurface || reminders.PausedBy == ReminderPause.Interaction))
+        {
+            actions |= FocusAction.Snooze | FocusAction.Skip;
+        }
+        else if (reminders.Phase == ReminderPhase.Break && scheduledSurface)
+        {
+            actions |= FocusAction.EndBreak;
+        }
+        return actions;
+    }
+
+    private string? ExecuteFocusAction(FocusAction action)
+    {
+        var checkPresentation = visible != Surface.Preview || (!preview.HasForeground && !desktop.TrayFlyoutHasForeground);
+        systemPauseForFocus = desktop.GetSystemPause(checkPresentation);
+        if ((AvailableFocusActions(systemPauseForFocus) & action) == 0)
+        {
+            PublishFocusSnapshot();
+            return "That action is unavailable right now.";
+        }
+
+        if (action is FocusAction.Start or FocusAction.Stop)
+        {
+            var enabled = action == FocusAction.Start;
+            var result = CompleteReminderAction(reminders.WithSettings(reminders.Settings with { Enabled = enabled }));
+            if (result is null)
+            {
+                main?.Breaks.RebaseEnabled(enabled);
+            }
+            return result;
+        }
+        if (action == FocusAction.Preview)
+        {
+            return TryStartManualPreview(main!.Handle, sample: false);
+        }
+        if (action == FocusAction.CancelPreview)
+        {
+            Dismiss();
+            UpdateScheduledReminders();
+            return null;
+        }
+
+        var candidate = reminders.Copy();
+        switch (action)
+        {
+            case FocusAction.Pause:
+            case FocusAction.Resume:
+                var environment = systemPauseForFocus | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
+                if (!candidate.SetWorkPause(action == FocusAction.Pause, environment))
+                {
+                    UpdateScheduledReminders();
+                    return "The work interval has ended. Use the available break controls.";
+                }
+                break;
+            case FocusAction.Snooze:
+                candidate.Snooze();
+                break;
+            case FocusAction.Skip:
+            case FocusAction.EndBreak:
+                candidate.Skip();
+                break;
+            default:
+                return "That action is unavailable right now.";
+        }
+        return CompleteReminderAction(candidate);
     }
 }

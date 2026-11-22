@@ -204,7 +204,7 @@ internal sealed partial class AfterbreakSession
                 desktop.Dispose();
                 capture.Close();
                 warning.Close();
-                preview.Close();
+                preview.CloseForQuit();
                 board?.CloseForQuit();
                 reminderSettings?.CloseForQuit();
                 captureSettings?.CloseForQuit();
@@ -426,6 +426,7 @@ internal sealed partial class AfterbreakSession
             var source = desktop.WorkWindow();
             if (!preview.TryShow(source))
             {
+                diagnostics?.Write($"event=not-shown phase=Preview mode=manual reason=prepare-break {preview.DescribePlacement()}");
                 Dismiss("manual-break-placement");
                 return;
             }
@@ -517,8 +518,7 @@ internal sealed partial class AfterbreakSession
                 warning.AppWindow.Hide();
                 break;
             case Surface.Preview:
-                preview.StopSceneEntrance();
-                SurfaceWindow.HideAndReturn(preview, returnWindow);
+                preview.HideAndReturn(returnWindow);
                 break;
         }
         returnWindow = 0;

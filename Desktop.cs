@@ -24,6 +24,7 @@ internal sealed class Desktop : IDisposable
     private const uint NoRepeat = 0x4000;
     private const uint ForegroundEvent = 3;
     private const string WindowClass = "Afterbreak.Tray";
+    private const string ShellFullscreenExclusion = "NonRudeHWND";
 
     private readonly WindowProcedure procedure;
     private readonly WinEventProcedure foregroundProcedure;
@@ -217,6 +218,12 @@ internal sealed class Desktop : IDisposable
         const int noActivateStyle = 0x08000000;
         _ = SetWindowLongPtr(window, extendedStyle, GetWindowLongPtr(window, extendedStyle) | noActivateStyle);
     }
+
+    // The Shell must not count our break as a fullscreen app when assessing notifications.
+    // This window property leaves other apps and real Windows presentation settings intact.
+    internal static bool TryExcludeShellFullscreen(nint window) => SetPropW(window, ShellFullscreenExclusion, 1);
+
+    internal static void ClearShellFullscreenExclusion(nint window) => _ = RemovePropW(window, ShellFullscreenExclusion);
 
     internal static bool IsForeground(nint window) => GetForegroundWindow() == window;
 
@@ -724,6 +731,10 @@ internal sealed class Desktop : IDisposable
     private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint window, int index);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern bool SetPropW(nint window, string name, nint value);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern nint RemovePropW(nint window, string name);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern nint SetWindowLongPtr(nint window, int index, nint value);
 }

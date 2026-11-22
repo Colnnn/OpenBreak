@@ -409,6 +409,7 @@ internal sealed class BreakWindow : Window
     private double textScale = 1;
     private bool stackBoard;
     private bool animateScene;
+    private bool shellFullscreenExcluded;
     private SurfacePlacement placement;
 
     internal BreakWindow(Action dismiss)
@@ -556,11 +557,22 @@ internal sealed class BreakWindow : Window
 
     internal bool HasForeground => Desktop.IsForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
     internal bool PlacementIsCurrent => AppWindow.IsVisible && SurfaceWindow.IsCurrent(this, placement);
-    internal string DescribePlacement() => SurfaceWindow.DescribePlacement(this, placement);
+    internal string DescribePlacement() =>
+        $"{SurfaceWindow.DescribePlacement(this, placement)} shellFullscreenExcluded={shellFullscreenExcluded}";
+
+    internal bool TryPrepareToShow(nint source)
+    {
+        if (!SurfaceWindow.TryPlaceBreak(this, source, out placement))
+        {
+            return false;
+        }
+        shellFullscreenExcluded = Desktop.TryExcludeShellFullscreen(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        return shellFullscreenExcluded;
+    }
 
     internal bool TryShow(nint source)
     {
-        if (!SurfaceWindow.TryPlaceBreak(this, source, out placement))
+        if (!TryPrepareToShow(source))
         {
             return false;
         }
@@ -572,6 +584,28 @@ internal sealed class BreakWindow : Window
         end.Focus(FocusState.Programmatic);
         StartSceneEntrance();
         return true;
+    }
+
+    internal void HideAndReturn(nint source)
+    {
+        StopSceneEntrance();
+        SurfaceWindow.HideAndReturn(this, source);
+        ClearShellFullscreenExclusion();
+    }
+
+    internal void CloseForQuit()
+    {
+        ClearShellFullscreenExclusion();
+        Close();
+    }
+
+    private void ClearShellFullscreenExclusion()
+    {
+        if (shellFullscreenExcluded)
+        {
+            Desktop.ClearShellFullscreenExclusion(WinRT.Interop.WindowNative.GetWindowHandle(this));
+            shellFullscreenExcluded = false;
+        }
     }
 
     internal void ApplyAppearance(AppearanceState state)

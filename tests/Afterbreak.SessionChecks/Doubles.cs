@@ -256,6 +256,8 @@ namespace Afterbreak
         public bool Foreground { get; set; } = true;
         public bool HasForeground => IsVisible && Foreground;
         public bool CanPlace { get; set; } = true;
+        public bool CanExcludeShellFullscreen { get; set; } = true;
+        public bool ShellFullscreenExcluded { get; private set; }
         public bool RetainedDisplayAvailable { get; set; } = true;
         public bool PlacementIsCurrent => IsVisible && RetainedDisplayAvailable;
         public string DescribePlacement() => $"visible={IsVisible} areaMatches={RetainedDisplayAvailable}";
@@ -275,17 +277,30 @@ namespace Afterbreak
         public bool TryShow(nint source)
         {
             Attempts++;
-            if (!CanPlace)
+            if (!CanPlace || !CanExcludeShellFullscreen)
             {
                 return false;
             }
             Shows++;
+            ShellFullscreenExcluded = true;
             IsVisible = true;
             RetainedDisplayAvailable = true;
             return true;
         }
 
         public void Update(int seconds) => Seconds = seconds;
+
+        public void HideAndReturn(nint source)
+        {
+            SurfaceWindow.HideAndReturn(this, source);
+            ShellFullscreenExcluded = false;
+        }
+
+        public void CloseForQuit()
+        {
+            ShellFullscreenExcluded = false;
+            Close();
+        }
     }
 
     internal sealed class BoardWindow : TestSurface

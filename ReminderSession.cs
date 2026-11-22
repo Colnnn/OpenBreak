@@ -164,7 +164,8 @@ internal sealed partial class AfterbreakSession
                 : preview.TryShow(source);
             if (!shown)
             {
-                diagnostics?.Write($"event=not-shown phase={intended} mode=scheduled reason=placement");
+                diagnostics?.Write($"event=not-shown phase={intended} mode=scheduled reason=prepare-surface " +
+                    (intended == Surface.Preview ? preview.DescribePlacement() : warning.DescribePlacement()));
                 SkipForDisplayLoss();
                 return;
             }

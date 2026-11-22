@@ -10,6 +10,7 @@ internal static class PlacementLifecycleChecks
     {
         Manual(Path.Combine(directory, "manual-displays.db"));
         Scheduled(Path.Combine(directory, "scheduled-displays.db"));
+        PreviewWithoutForeground(Path.Combine(directory, "unfocused-preview.db"));
         DiagnosticTrace(directory);
     }
 
@@ -115,6 +116,57 @@ internal static class PlacementLifecycleChecks
             "a second diagnostic run cannot replace an existing log or fail app startup");
         Check(BreakDiagnostics.Open(["--diagnostics", path + ":alternate.log"]) is null,
             "diagnostics cannot add an alternate data stream to an existing file");
+    }
+
+    private static void PreviewWithoutForeground(string path)
+    {
+        var queue = new DispatcherQueue();
+        var session = new AfterbreakSession(queue, () => { }, new TaskStore(path));
+        var tray = Desktop.Current;
+        var overlay = BreakWindow.Current;
+        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        void TickAt(int seconds)
+        {
+            startedAt.SetValue(session, Stopwatch.GetTimestamp() - seconds * Stopwatch.Frequency);
+            queue.Timer.Fire();
+        }
+
+        overlay.Foreground = false;
+        tray.Send(TrayCommand.Preview);
+        TickAt(9);
+        Check(WarningWindow.Current.IsVisible && WarningWindow.Seconds == 1 && !overlay.IsVisible,
+            "the preview waits through the last second of its nonactivating warning");
+        TickAt(10);
+        TickAt(9);
+        Check(!overlay.HasForeground && overlay.IsVisible && overlay.Seconds == 1 && tray.LastPresentationCheck,
+            "an eligible preview stays up for its countdown when Windows did not grant foreground");
+        TickAt(10);
+        Check(!overlay.IsVisible && !overlay.ShellFullscreenExcluded && tray.PreviewAvailable,
+            "the unfocused preview expires normally and clears its shell registration");
+
+        tray.Send(TrayCommand.Preview);
+        TickAt(10);
+        tray.SystemPause = ReminderPause.Presentation;
+        TickAt(1);
+        Check(!overlay.IsVisible && tray.LastPresentationCheck,
+            "real shell presentation suppression still dismisses an unfocused break");
+        tray.SystemPause = ReminderPause.None;
+        overlay.Foreground = true;
+        tray.Send(TrayCommand.Preview);
+        TickAt(10);
+        tray.SystemPause = ReminderPause.Locked;
+        TickAt(1);
+        Check(!overlay.IsVisible && !tray.LastPresentationCheck,
+            "session locking still dismisses a break even while it owns foreground");
+
+        tray.SystemPause = ReminderPause.None;
+        overlay.CanExcludeShellFullscreen = false;
+        tray.Send(TrayCommand.Preview);
+        TickAt(10);
+        Check(!overlay.IsVisible && !queue.Timer.Running && tray.PreviewAvailable,
+            "failed shell registration leaves no break running");
+        tray.Send(TrayCommand.Quit);
     }
 
     private static void Scheduled(string path)

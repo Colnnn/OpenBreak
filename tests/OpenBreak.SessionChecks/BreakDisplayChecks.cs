@@ -3,7 +3,7 @@ using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class BreakDisplayChecks
 {
@@ -408,17 +408,17 @@ internal static class BreakDisplayChecks
         tray.Send(TrayCommand.Quit);
     }
 
-    private static (AfterbreakSession Session, DispatcherQueue Queue, Desktop Tray) Open(TaskStore store, TestClock clock,
+    private static (OpenBreakSession Session, DispatcherQueue Queue, Desktop Tray) Open(TaskStore store, TestClock clock,
         Action? playBreakCue = null)
     {
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store, clock, playBreakCue: playBreakCue);
+        var session = new OpenBreakSession(queue, () => { }, store, clock, playBreakCue: playBreakCue);
         return (session, queue, Desktop.Current);
     }
 
-    private static void ExpireWarning(AfterbreakSession session, DispatcherQueue queue)
+    private static void ExpireWarning(OpenBreakSession session, DispatcherQueue queue)
     {
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
         startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
         queue.Timer.Fire();
     }

@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Path = Microsoft.UI.Xaml.Shapes.Path;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class StillBackdrop
 {

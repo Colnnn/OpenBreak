@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class FocusPage : UserControl
 {

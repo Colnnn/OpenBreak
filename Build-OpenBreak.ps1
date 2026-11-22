@@ -17,11 +17,11 @@ if ($CaptureMotionStudy -and $Action -ne 'Launch') {
 }
 $repository = $PSScriptRoot
 $config = Join-Path $repository 'NuGet.Config'
-$project = Join-Path $repository 'Afterbreak.csproj'
+$project = Join-Path $repository 'OpenBreak.csproj'
 $sdkVersion = (Get-Content (Join-Path $repository 'global.json') -Raw | ConvertFrom-Json).sdk.version
 $runtimeVersion = '10.0.15'
 $rid = 'win-x64'
-$payloadName = "Afterbreak-$rid"
+$payloadName = "OpenBreak-$rid"
 $utf8 = [Text.UTF8Encoding]::new($false)
 
 function Invoke-Checked($executable, [string[]] $arguments) {
@@ -155,20 +155,20 @@ function Write-Artifact($stage, $payload, $source) {
 }
 
 function Publish-Package($destination, $source) {
-    $stage = Join-Path ([IO.Path]::GetDirectoryName($destination)) ".afterbreak-$([Guid]::NewGuid().ToString('N'))"
+    $stage = Join-Path ([IO.Path]::GetDirectoryName($destination)) ".openbreak-$([Guid]::NewGuid().ToString('N'))"
     [void][IO.Directory]::CreateDirectory($stage)
     $payload = Join-Path $stage $payloadName
     try {
         Invoke-Checked $sdk @('publish', $project, '-c', $Configuration, '--no-restore', '-r', $rid,
             '--self-contained', 'true', '-o', $payload)
-        foreach ($name in @('Afterbreak.exe', 'Afterbreak.pri', 'App.xbf', 'coreclr.dll', 'hostpolicy.dll', 'Microsoft.UI.Xaml.dll', 'e_sqlite3.dll')) {
+        foreach ($name in @('OpenBreak.exe', 'OpenBreak.pri', 'App.xbf', 'coreclr.dll', 'hostpolicy.dll', 'Microsoft.UI.Xaml.dll', 'e_sqlite3.dll')) {
             if (-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)) {
                 throw "Self-contained publish is missing $name."
             }
         }
-        $runtime = Get-Content (Join-Path $payload 'Afterbreak.runtimeconfig.json') -Raw | ConvertFrom-Json
+        $runtime = Get-Content (Join-Path $payload 'OpenBreak.runtimeconfig.json') -Raw | ConvertFrom-Json
         $framework = $runtime.runtimeOptions.includedFrameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }
-        $dependencies = Get-Content (Join-Path $payload 'Afterbreak.deps.json') -Raw | ConvertFrom-Json
+        $dependencies = Get-Content (Join-Path $payload 'OpenBreak.deps.json') -Raw | ConvertFrom-Json
         if (-not $framework -or $framework.version -ne $runtimeVersion -or $dependencies.runtimeTarget.name -notlike "*/$rid") {
             throw "Expected a self-contained .NET $runtimeVersion $rid publish."
         }
@@ -185,6 +185,8 @@ function Publish-Package($destination, $source) {
 }
 
 # Resolve a caller-supplied path before switching the working directory for global.json.
+if (-not $DotNetPath) { $DotNetPath = $env:OPENBREAK_DOTNET }
+# Accept the previous variable for local build environments that are already configured.
 if (-not $DotNetPath) { $DotNetPath = $env:AFTERBREAK_DOTNET }
 if ($DotNetPath) { $DotNetPath = (Get-Item -LiteralPath $DotNetPath).FullName }
 if ($Action -eq 'Package') {
@@ -208,16 +210,16 @@ try {
     $sdk = $DotNetPath
     $env:DOTNET_ROOT_X64 = Split-Path -Parent $sdk
     if ((Invoke-Checked $sdk @('--version')) -ne $sdkVersion) {
-        throw "Use .NET SDK $sdkVersion via -DotNetPath or AFTERBREAK_DOTNET."
+        throw "Use .NET SDK $sdkVersion via -DotNetPath or OPENBREAK_DOTNET."
     }
     if ($Action -eq 'Test') {
         foreach ($check in @('Placement', 'Reminder', 'Session', 'Storage', 'Launch')) {
-            $name = "Afterbreak.${check}Checks"
+            $name = "OpenBreak.${check}Checks"
             $suite = Join-Path $repository "tests\$name\$name.csproj"
             Invoke-Checked $sdk @('restore', $suite, '--locked-mode', '--configfile', $config)
             Invoke-Checked $sdk @('run', '--project', $suite, '-c', $Configuration, '--no-restore')
         }
-        & (Join-Path $repository 'tests\Afterbreak.InstallerChecks\Test-InstallerPackage.ps1')
+        & (Join-Path $repository 'tests\OpenBreak.InstallerChecks\Test-InstallerPackage.ps1')
     } else {
         Invoke-Checked $sdk @('restore', $project, '--locked-mode', '--configfile', $config)
         if ($Action -eq 'Package') { Publish-Package $destination $source } else {

@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class CaptureSettingsPage : UserControl
 {
@@ -78,7 +78,7 @@ internal sealed class CaptureSettingsPage : UserControl
             guideError.IsOpen = false;
         };
         guide.Children.Add(discardDisplay);
-        guide.Children.Add(BodyText("When you’re ready for scheduled breaks, choose Start focus on the Focus page. Closing this window keeps Afterbreak running in the tray. Choose Quit Afterbreak from the tray to stop it."));
+        guide.Children.Add(BodyText("When you’re ready for scheduled breaks, choose Start focus on the Focus page. Closing this window keeps OpenBreak running in the tray. Choose Quit OpenBreak from the tray to stop it."));
         var dismiss = new Button { Content = "Got it" };
         dismiss.Click += (_, _) =>
         {

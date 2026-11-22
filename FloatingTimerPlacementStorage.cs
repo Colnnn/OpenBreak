@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal readonly record struct FloatingTimerPosition(string Monitor, int Horizontal, int Vertical)
 {

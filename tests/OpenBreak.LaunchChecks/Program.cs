@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class Program
 {
@@ -11,18 +11,21 @@ internal static class Program
 
     private static async Task Main(string[] args)
     {
-        if (args is ["--worker", var pipeName] && pipeName.StartsWith("Afterbreak.Check.", StringComparison.Ordinal))
+        if (args is ["--worker", var pipeName] && pipeName.StartsWith("OpenBreak.Check.", StringComparison.Ordinal))
         {
             await RunServerProcess(pipeName);
             return;
         }
         if (args is ["--duplicate", var endpoint, .. var options] &&
-            endpoint.StartsWith("Afterbreak.Check.", StringComparison.Ordinal))
+            endpoint.StartsWith("OpenBreak.Check.", StringComparison.Ordinal))
         {
             await LaunchArguments.RelayDuplicateAsync(options,
                 () => new LaunchPipe(endpoint, SessionId).RequestRevealAsync(TestBudget));
             return;
         }
+        Check(LaunchArguments.InstanceMutexName == @"Local\Afterbreak.NativeStudy" &&
+            LaunchPipe.NameForSession(42) == "Afterbreak.Reveal.v1.Session42",
+            "renamed builds share the original instance guard and per-session reveal endpoint");
         Check(LaunchArguments.RevealMain([]) && LaunchArguments.RevealMain(["--capture-motion-study"]) &&
             LaunchArguments.RevealMain(["--diagnostics", "trace.log"]) && LaunchArguments.RevealMain(["--Startup"]),
             "normal, diagnostic and motion launches reveal unless the flag matches exactly");
@@ -234,7 +237,7 @@ internal static class Program
         return (uint)process.SessionId;
     }
 
-    private static string TestPipeName() => $"Afterbreak.Check.{Guid.NewGuid():N}";
+    private static string TestPipeName() => $"OpenBreak.Check.{Guid.NewGuid():N}";
 
     private static void Check(bool passed, string message)
     {

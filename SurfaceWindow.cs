@@ -1,7 +1,7 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class SurfaceWindow
 {

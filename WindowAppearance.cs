@@ -7,7 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class WindowAppearance : IDisposable
 {
@@ -68,7 +68,7 @@ internal sealed class WindowAppearance : IDisposable
         var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray or SurfaceMaterial.FloatingTimer;
         var panel = frame ? (Border)window.Content : new Border
         {
-            Style = (Style)Application.Current.Resources["AfterbreakOpaqueBackdropStyle"],
+            Style = (Style)Application.Current.Resources["OpenBreakOpaqueBackdropStyle"],
         };
         if (!frame)
         {

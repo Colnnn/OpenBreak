@@ -3,13 +3,13 @@ using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class Program
 {
     private static void Main()
     {
-        var temporary = Directory.CreateTempSubdirectory("Afterbreak-session-");
+        var temporary = Directory.CreateTempSubdirectory("OpenBreak-session-");
         try
         {
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
@@ -54,7 +54,7 @@ internal static class Program
             """;
         trigger.ExecuteNonQuery();
 
-        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store);
+        _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store);
         var tray = Desktop.Current;
         tray.Send(TrayCommand.Capture, 701);
         var capture = CaptureWindow.Current;
@@ -118,13 +118,13 @@ internal static class Program
     private static void CheckCaptureMotionStudy(string path)
     {
         var store = new TaskStore(path);
-        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store);
+        _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store);
         Desktop.Current.Send(TrayCommand.Capture);
         Check(CaptureWindow.Current.IsVisible && CaptureWindow.Current.EntranceStarts == 0,
             "normal capture remains immediately available without a study entrance");
         Desktop.Current.Send(TrayCommand.Quit);
 
-        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store, captureMotionStudy: true);
+        _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store, captureMotionStudy: true);
         var tray = Desktop.Current;
         var capture = CaptureWindow.Current;
         capture.CanPlace = false;
@@ -179,10 +179,10 @@ internal static class Program
 
         var queue = new DispatcherQueue();
         var didQuit = false;
-        var session = new AfterbreakSession(queue, () => didQuit = true, store);
+        var session = new OpenBreakSession(queue, () => didQuit = true, store);
         var tray = Desktop.Current;
         var capture = CaptureWindow.Current;
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Check the session clock before updating this test.");
 
         void Elapse()
@@ -349,7 +349,7 @@ internal static class Program
         var queue = new DispatcherQueue();
         var store = new TaskStore(path);
         store.Add("Private return task");
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
         var capture = CaptureWindow.Current;
         var schedulerTimer = queue.Timers[1];
@@ -440,7 +440,7 @@ internal static class Program
             using var command = blocker.CreateCommand();
             command.CommandText = "BEGIN EXCLUSIVE;";
             command.ExecuteNonQuery();
-            _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store, clock);
+            _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store, clock);
             command.CommandText = "ROLLBACK;";
             command.ExecuteNonQuery();
         }
@@ -466,7 +466,7 @@ internal static class Program
         var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
         var timer = queue.Timers[1];
         var initialWarnings = WarningWindow.Shows;
@@ -518,7 +518,7 @@ internal static class Program
 
         tray.Send(TrayCommand.Quit);
         Check(MainWindow.Current.Closed && tray.CaptureBinding.Active is null, "quit closes capture settings and releases the active shortcut");
-        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, new TaskStore(path), clock);
+        _ = new OpenBreakSession(new DispatcherQueue(), () => { }, new TaskStore(path), clock);
         Check(Desktop.Current.CaptureBinding.Active?.ToString() == "Ctrl+Shift+7", "startup re-registers the persisted shortcut");
         Desktop.Current.Send(TrayCommand.Quit);
     }
@@ -530,7 +530,7 @@ internal static class Program
         var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
         var appearance = WindowAppearance.Current;
         var timer = queue.Timers[1];
@@ -589,7 +589,7 @@ internal static class Program
         var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
         var timer = queue.Timers[1];
 
@@ -608,7 +608,7 @@ internal static class Program
         tray.Send(TrayCommand.Settings);
         Check(ReferenceEquals(MainWindow.Current, host) && tray.MainHandle == host.Handle &&
             host.CurrentPage == ManagementPage.Breaks && !host.DefersReminders,
-            "Open Afterbreak and the Settings deep link use one host and a clean page does not defer");
+            "Open OpenBreak and the Settings deep link use one host and a clean page does not defer");
         var draft = settings with { WorkSeconds = 42 };
         host.Breaks.Draft = draft;
         Tick(12);
@@ -642,7 +642,7 @@ internal static class Program
     {
         var store = new TaskStore(path);
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store);
+        var session = new OpenBreakSession(queue, () => { }, store);
         var tray = Desktop.Current;
         Check(tray.MainHandle == 0 && !queue.Timers[1].Running,
             "a quiet start leaves the main window unopened with reminders still off");
@@ -693,7 +693,7 @@ internal static class Program
 
         const int breakSource = 802;
         tray.WorkSource = breakSource;
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
         startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
         queue.Timer.Fire();
         var breakStart = startedAt.GetValue(session);
@@ -720,7 +720,7 @@ internal static class Program
         var active = store.List(archived: false)[1];
         store.Move(active.Id, TaskStatus.InProgress);
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        var session = new OpenBreakSession(queue, () => { }, store, clock);
         session.RevealFromLaunch();
         var tray = Desktop.Current;
         var host = MainWindow.Current;
@@ -778,7 +778,7 @@ internal static class Program
         Check(focus.Execute(FocusAction.Preview) is null && focus.Snapshot is { PreviewPhase: ReminderPhase.Warning, Seconds: 8 } &&
             Can(FocusAction.CancelPreview) && WarningWindow.Current.IsVisible,
             "a manual preview reports its own warning while the scheduled work countdown remains frozen");
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
         startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
         queue.Timer.Fire();
         Check(focus.Snapshot is { PreviewPhase: ReminderPhase.Break, Seconds: 8, CompletedShorts: 0 } &&
@@ -794,7 +794,7 @@ internal static class Program
             "Focus reports all overlapping pauses while presentation and Windows block preview");
         tray.Send(TrayCommand.Quit);
         queue = new DispatcherQueue();
-        session = new AfterbreakSession(queue, () => { }, store, clock);
+        session = new OpenBreakSession(queue, () => { }, store, clock);
         session.RevealFromLaunch();
         tray = Desktop.Current;
         focus = MainWindow.Current.FocusHome;
@@ -837,7 +837,7 @@ internal static class Program
         var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
 
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
@@ -895,7 +895,7 @@ internal static class Program
         };
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        var session = new OpenBreakSession(queue, () => { }, store, clock);
         session.RevealFromLaunch();
         var host = MainWindow.Current;
         var focus = host.FocusHome;

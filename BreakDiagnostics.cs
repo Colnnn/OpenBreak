@@ -1,6 +1,6 @@
 using System.Security;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class BreakDiagnostics : IDisposable
 {

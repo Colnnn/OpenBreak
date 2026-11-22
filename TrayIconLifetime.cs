@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal readonly record struct TrayIconDesign(string Glyphs, bool FinalMinute, int Size, uint Background, uint Ink);
 

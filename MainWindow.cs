@@ -2,7 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal enum ManagementPage { Focus, Tasks, Breaks, Capture, Appearance }
 
@@ -39,7 +39,7 @@ internal sealed class MainWindow : Window
         Appearance = appearance;
         Tasks.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Tasks;
         Capture.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Capture;
-        Title = "Afterbreak";
+        Title = "OpenBreak";
 
         var body = new Grid();
         AddPage(ManagementPage.Focus, "Focus", Symbol.Play, focus);

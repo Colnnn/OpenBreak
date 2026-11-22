@@ -8,7 +8,7 @@ using Windows.UI;
 using Windows.UI.Text;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class SurfaceStyle
 {
@@ -78,19 +78,19 @@ internal static class SurfaceStyle
     internal static TextBlock SecondaryLabel(string text, double size)
     {
         var label = Label(text, size);
-        label.Style = (Style)Application.Current.Resources["AfterbreakSecondaryLabelStyle"];
+        label.Style = (Style)Application.Current.Resources["OpenBreakSecondaryLabelStyle"];
         return label;
     }
 
     internal static Border Frame(UIElement child) => new()
     {
-        Style = (Style)Application.Current.Resources["AfterbreakSurfaceFrameStyle"],
+        Style = (Style)Application.Current.Resources["OpenBreakSurfaceFrameStyle"],
         Child = child,
     };
 
     internal static Border Panel(UIElement? child = null) => new()
     {
-        Style = (Style)Application.Current.Resources["AfterbreakPanelStyle"],
+        Style = (Style)Application.Current.Resources["OpenBreakPanelStyle"],
         Child = child,
         CornerRadius = PanelCorner,
         Padding = new Thickness(ContentGap),

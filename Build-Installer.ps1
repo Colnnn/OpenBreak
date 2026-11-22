@@ -15,10 +15,10 @@ $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
 $compilerVersion = '7.1.1'
 $expectedCompilerSha = 'e0f9f1dc32032650c6629f6dee41eb6d20ba140e4e3c07c25d8a24f9ba781644'
-$version = ([xml](Get-Content (Join-Path $repo 'Afterbreak.csproj') -Raw)).Project.PropertyGroup.Version
+$version = ([xml](Get-Content (Join-Path $repo 'OpenBreak.csproj') -Raw)).Project.PropertyGroup.Version
 if ($version -notmatch '^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$' -or
     @($version.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count) {
-    throw 'Afterbreak.csproj must specify a numeric major.minor.patch version.'
+    throw 'OpenBreak.csproj must specify a numeric major.minor.patch version.'
 }
 
 function Get-InstallerSource {
@@ -27,7 +27,7 @@ function Get-InstallerSource {
     $changes = @(& git -C $repo --no-optional-locks status --porcelain --untracked-files=all)
     if ($LASTEXITCODE -ne 0) { throw 'Could not check whether installer source is clean.' }
     $hashes = [ordered]@{}
-    foreach ($path in @('Afterbreak.csproj', 'Build-Installer.ps1', 'installer/Afterbreak.iss',
+    foreach ($path in @('OpenBreak.csproj', 'Build-Installer.ps1', 'installer/OpenBreak.iss',
         'installer/InstallPolicy.iss', 'installer/PackagePolicy.ps1')) {
         $hashes[$path] = Get-Sha256 (Join-Path $repo $path)
     }
@@ -40,6 +40,8 @@ if (-not $PackageRevision) { $PackageRevision = $source.revision }
 if (($source.dirty -or ($PackageRevision -ne $source.revision)) -and -not $AllowDevelopment) {
     throw 'Use matching clean installer source and application package. -AllowDevelopment marks a compile-only candidate.'
 }
+if (-not $CompilerPath) { $CompilerPath = $env:OPENBREAK_ISCC }
+# Accept the previous variable for local build environments that are already configured.
 if (-not $CompilerPath) { $CompilerPath = $env:AFTERBREAK_ISCC }
 if (-not $CompilerPath) {
     $CompilerPath = Join-Path (Split-Path -Parent $repo) ".tools\inno-$compilerVersion\ISCC.exe"
@@ -55,18 +57,18 @@ if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne $compilerVersion) {
 
 $zip = (Get-Item -LiteralPath $PackageZip).FullName
 $parent = [IO.Path]::GetDirectoryName($destination)
-$stage = Join-Path $parent ".afterbreak-installer-$([Guid]::NewGuid().ToString('N'))"
+$stage = Join-Path $parent ".openbreak-installer-$([Guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($stage)
 $payload = Join-Path $stage 'payload'
 $artifact = Join-Path $stage 'artifact'
 try {
     $package = Expand-VerifiedPackage $zip $ExpectedPackageSha256 $PackageRevision $payload
     [void][IO.Directory]::CreateDirectory($artifact)
-    $script = Join-Path $repo 'installer\Afterbreak.iss'
+    $script = Join-Path $repo 'installer\OpenBreak.iss'
     & $compiler "/DAppVersion=$version" "/DPayloadRoot=$payload" "/DManifestHash=$($package.manifestSha256)" "/O$artifact" $script
     if ($LASTEXITCODE -ne 0) { throw "ISCC exited with code $LASTEXITCODE." }
 
-    $name = "Afterbreak-$version-win-x64-Setup.exe"
+    $name = "OpenBreak-$version-win-x64-Setup.exe"
     $installer = Join-Path $artifact $name
     $installerSha = Get-Sha256 $installer
     $metadata = [ordered]@{

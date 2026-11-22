@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed partial class TaskStore
 {

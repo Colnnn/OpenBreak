@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class BreakStartSound
 {

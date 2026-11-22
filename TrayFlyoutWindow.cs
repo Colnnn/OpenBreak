@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class TrayFlyoutWindow : Window
 {
@@ -32,7 +32,7 @@ internal sealed class TrayFlyoutWindow : Window
 
     internal TrayFlyoutWindow()
     {
-        Title = "Afterbreak";
+        Title = "OpenBreak";
         status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Caption);
         status.TextWrapping = TextWrapping.Wrap;
         status.Margin = RowInsets();

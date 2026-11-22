@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class ScenePreview : UserControl
 {

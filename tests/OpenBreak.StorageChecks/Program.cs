@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class Program
 {
@@ -19,9 +19,10 @@ internal static class Program
 
     private static async Task Main()
     {
-        var temporary = Directory.CreateTempSubdirectory("Afterbreak-storage-");
+        var temporary = Directory.CreateTempSubdirectory("OpenBreak-storage-");
         try
         {
+            CheckRenameCompatibility(temporary.FullName);
             RoundTrip(Path.Combine(temporary.FullName, "roundtrip.db"));
             Console.WriteLine("PASS task edits, status moves, ordering, archive and restore across reopen");
             CheckCaptureNotes(Path.Combine(temporary.FullName, "capture-notes.db"));
@@ -61,6 +62,21 @@ internal static class Program
         {
             temporary.Delete(recursive: true);
         }
+    }
+
+    private static void CheckRenameCompatibility(string folder)
+    {
+        var existingPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Afterbreak", "tasks.db");
+        Require(TaskStore.CurrentUserDatabasePath == existingPath,
+            "OpenBreak resolves the original per-user store");
+
+        var path = Path.Combine(folder, "rename.db");
+        var store = new TaskStore(path);
+        store.Add("Keep this task", null);
+        Require(Scalar(path, "PRAGMA application_id") is 0x41465442L && Scalar(path, "PRAGMA user_version") is 9L,
+            "OpenBreak uses the existing database identity and schema version");
+        Console.WriteLine("PASS OpenBreak preserves the data directory and SQLite identity");
     }
 
     private static void CheckCountdownV9(string folder)

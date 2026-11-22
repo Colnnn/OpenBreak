@@ -1,6 +1,6 @@
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class SimulatedReminderDay(string path)
 {
@@ -163,7 +163,7 @@ internal sealed class SimulatedReminderDay(string path)
     {
         var queue = new DispatcherQueue();
         var before = ShowCount();
-        _ = new AfterbreakSession(queue, () => { }, new TaskStore(path), clock);
+        _ = new OpenBreakSession(queue, () => { }, new TaskStore(path), clock);
         scheduler = queue.Timers[1];
         Require(scheduler.Running && ShowCount() == before, "restart resumes quietly");
     }

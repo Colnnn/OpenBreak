@@ -1,7 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class Program
 {
@@ -9,7 +9,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         var revealMain = LaunchArguments.RevealMain(args);
-        var instance = new Mutex(true, @"Local\Afterbreak.NativeStudy", out var firstInstance);
+        var instance = new Mutex(true, LaunchArguments.InstanceMutexName, out var firstInstance);
         if (!firstInstance)
         {
             instance.Dispose();
@@ -24,14 +24,14 @@ internal static class Program
         var captureMotionStudy = args.Contains("--capture-motion-study", StringComparer.Ordinal);
         using var diagnostics = BreakDiagnostics.Open(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
-        AfterbreakApp? app = null;
+        OpenBreakApp? app = null;
         try
         {
             Application.Start(initialization =>
             {
                 var dispatcher = DispatcherQueue.GetForCurrentThread();
                 SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(dispatcher));
-                app = new AfterbreakApp(revealMain, captureMotionStudy, diagnostics, shutdown);
+                app = new OpenBreakApp(revealMain, captureMotionStudy, diagnostics, shutdown);
             });
         }
         finally
@@ -42,17 +42,17 @@ internal static class Program
     }
 }
 
-public sealed partial class AfterbreakApp : Application
+public sealed partial class OpenBreakApp : Application
 {
     private readonly bool captureMotionStudy;
     private readonly bool revealMain;
     private readonly BreakDiagnostics? diagnostics;
     private readonly CancellationTokenSource shutdown;
-    private AfterbreakSession? session;
+    private OpenBreakSession? session;
 
     internal Task? Listener { get; private set; }
 
-    internal AfterbreakApp(bool revealMain, bool captureMotionStudy, BreakDiagnostics? diagnostics,
+    internal OpenBreakApp(bool revealMain, bool captureMotionStudy, BreakDiagnostics? diagnostics,
         CancellationTokenSource shutdown)
     {
         this.revealMain = revealMain;
@@ -65,7 +65,7 @@ public sealed partial class AfterbreakApp : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         var dispatcher = DispatcherQueue.GetForCurrentThread();
-        session = new AfterbreakSession(dispatcher, Quit, captureMotionStudy: captureMotionStudy,
+        session = new OpenBreakSession(dispatcher, Quit, captureMotionStudy: captureMotionStudy,
             diagnostics: diagnostics, playBreakCue: BreakStartSound.Play);
         var queue = new LaunchRevealQueue(action => dispatcher.TryEnqueue(() => action()),
             session.RevealFromLaunch, shutdown.Token);

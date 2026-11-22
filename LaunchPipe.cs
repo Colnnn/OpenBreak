@@ -3,11 +3,13 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class LaunchArguments
 {
     internal const string StartupFlag = "--startup";
+    // Share the single-instance guard with installed builds under the previous name.
+    internal const string InstanceMutexName = @"Local\Afterbreak.NativeStudy";
 
     internal static bool RevealMain(string[] args) => !args.Contains(StartupFlag, StringComparer.Ordinal);
 
@@ -17,6 +19,8 @@ internal static class LaunchArguments
 
 internal sealed class LaunchPipe(string name, uint sessionId)
 {
+    // The v1 reveal endpoint must still reach an instance under the previous name.
+    private const string RevealPipePrefix = "Afterbreak.Reveal.v1.Session";
     private const PipeOptions Options = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
     private const byte RevealByte = 1;
     private const byte AcceptedByte = 2;
@@ -27,8 +31,11 @@ internal sealed class LaunchPipe(string name, uint sessionId)
     {
         using var process = Process.GetCurrentProcess();
         var session = (uint)process.SessionId;
-        return new LaunchPipe($"Afterbreak.Reveal.v1.Session{session}", session);
+        return new LaunchPipe(NameForSession(session), session);
     }
+
+    internal static string NameForSession(uint session) =>
+        RevealPipePrefix + session.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     internal async Task<bool> RequestRevealAsync(TimeSpan connectTimeout, Action<uint>? grantForeground = null,
         CancellationToken cancellation = default)

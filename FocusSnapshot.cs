@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 [Flags]
 internal enum FocusAction

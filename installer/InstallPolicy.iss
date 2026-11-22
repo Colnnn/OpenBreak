@@ -1,5 +1,7 @@
 const
   QuietStartupSuffix = ' --startup';
+  { Older installers can register this executable in the same Run value. }
+  LegacyAppExecutable = 'Afterbreak.exe';
 
 type
   TInstallVersion = record
@@ -44,7 +46,7 @@ begin
     Result := A.Patch - B.Patch;
 end;
 
-function IsOwnedExecutableCommand(InstallRoot, Command: String): Boolean;
+function IsOwnedVersionedExecutable(InstallRoot, Command, Executable: String): Boolean;
 var
   Prefix, Suffix, Relative: String;
   Separator, Slot: Integer;
@@ -52,7 +54,7 @@ var
 begin
   Result := False;
   Prefix := '"' + InstallRoot + '\versions\';
-  Suffix := '\Afterbreak.exe"';
+  Suffix := '\' + Executable + '"';
   if (CompareText(Copy(Command, 1, Length(Prefix)), Prefix) <> 0) or
      (CompareText(Copy(Command, Length(Command) - Length(Suffix) + 1, Length(Suffix)), Suffix) <> 0) then
     Exit;
@@ -72,7 +74,8 @@ begin
   if (SuffixStart > 0) and
      (CompareStr(Copy(Command, SuffixStart, Length(QuietStartupSuffix)), QuietStartupSuffix) = 0) then
     Delete(Command, SuffixStart, Length(QuietStartupSuffix));
-  Result := IsOwnedExecutableCommand(InstallRoot, Command);
+  Result := IsOwnedVersionedExecutable(InstallRoot, Command, '{#AppExecutable}') or
+    IsOwnedVersionedExecutable(InstallRoot, Command, LegacyAppExecutable);
 end;
 
 function QuietStartupCommand(ExecutablePath: String): String;

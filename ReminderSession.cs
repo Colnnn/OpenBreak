@@ -1,8 +1,8 @@
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
-internal sealed partial class AfterbreakSession
+internal sealed partial class OpenBreakSession
 {
     private sealed class ReminderClock : TimeProvider
     {

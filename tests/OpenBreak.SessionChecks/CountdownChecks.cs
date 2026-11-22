@@ -1,6 +1,6 @@
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class CountdownChecks
 {
@@ -19,7 +19,7 @@ internal static class CountdownChecks
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
         FloatingTimerWindow.Current = null;
-        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        var session = new OpenBreakSession(queue, () => { }, store, clock);
         session.RevealFromLaunch();
         var tray = Desktop.Current;
         var host = MainWindow.Current;
@@ -116,7 +116,7 @@ internal static class CountdownChecks
         tray.Send(TrayCommand.Quit);
         Check(timer.Closed && !queue.Timers[1].IsRunning, "quit closes floating and stops the existing scheduler timer");
 
-        _ = new AfterbreakSession(new DispatcherQueue(), () => { }, store, clock);
+        _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store, clock);
         Check(FloatingTimerWindow.Current is { OriginalPosition: { } loaded, IsVisible: true } && loaded == position,
             "startup restores drag placement and the persisted floating opt-in");
         Desktop.Current.Send(TrayCommand.Quit);

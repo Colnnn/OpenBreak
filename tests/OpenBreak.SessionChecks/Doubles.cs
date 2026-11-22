@@ -33,7 +33,7 @@ namespace Microsoft.UI.Dispatching
     }
 }
 
-namespace Afterbreak
+namespace OpenBreak
 {
 
     internal sealed class Desktop

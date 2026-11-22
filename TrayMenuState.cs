@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal enum TrayCommand
 {
@@ -30,7 +30,7 @@ internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview,
 {
     internal TrayMenuItem[] Items() =>
     [
-        new(TrayCommand.OpenMain, "Open Afterbreak"),
+        new(TrayCommand.OpenMain, "Open OpenBreak"),
         new(TrayCommand.Capture, Shortcut is { } shortcut ? $"Capture task · {shortcut}" : "Capture task"),
         new(TrayCommand.Preview, "Preview a break", Enabled: CanPreview),
         new(TrayCommand.PreviewSampleBoard, "Preview sample board", Enabled: CanPreview),
@@ -41,7 +41,7 @@ internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview,
         new(TrayCommand.TogglePause, ManuallyPaused ? "Resume after presentation" : "Pause for presentation"),
         new(TrayCommand.Snooze, $"Snooze {ReminderDuration.Format(SnoozeSeconds)}", Visible: SnoozeAvailable),
         new(TrayCommand.Skip, "Skip break", Visible: SkipAvailable),
-        new(TrayCommand.Quit, "Quit Afterbreak"),
+        new(TrayCommand.Quit, "Quit OpenBreak"),
     ];
 
     internal bool CanInvoke(TrayMenuItem offered) => offered.Selectable && Items().Contains(offered);

@@ -8,7 +8,7 @@ using Microsoft.UI.Xaml.Media.Animation;
 using Windows.System;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class CaptureWindow : Window
 {
@@ -37,7 +37,7 @@ internal sealed class CaptureWindow : Window
     {
         this.save = save;
         this.captureMotionStudy = captureMotionStudy;
-        Title = "Afterbreak · Capture task";
+        Title = "OpenBreak · Capture task";
         title = SurfaceStyle.Label("Capture a task", SurfaceStyle.SurfaceTitle, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         input = new TextBox
@@ -290,7 +290,7 @@ internal sealed class WarningWindow : Window
 
     internal WarningWindow(Action snooze, Action skip)
     {
-        Title = "Afterbreak · Preview warning";
+        Title = "OpenBreak · Preview warning";
         title = SurfaceStyle.Label("", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", SurfaceStyle.Body);
@@ -427,7 +427,7 @@ internal sealed class BreakWindow : Window
 
     internal BreakWindow(Action dismiss)
     {
-        Title = "Afterbreak · Break preview";
+        Title = "OpenBreak · Break preview";
         clock = SurfaceStyle.Timer("0:10", 84);
         clock.HorizontalAlignment = HorizontalAlignment.Center;
         clock.Foreground = palette.Foreground;

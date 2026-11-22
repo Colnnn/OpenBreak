@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../AfterbreakSession.cs" Link="AfterbreakSession.cs" />
+    <Compile Include="../../OpenBreakSession.cs" Link="OpenBreakSession.cs" />
     <Compile Include="../../ReminderSession.cs" Link="ReminderSession.cs" />
     <Compile Include="../../FocusSnapshot.cs" Link="FocusSnapshot.cs" />
     <Compile Include="../../CountdownDisplay.cs" Link="CountdownDisplay.cs" />

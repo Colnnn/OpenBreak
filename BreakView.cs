@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal enum BreakLayout { TimerOnly, Compact, SavedBoard, SampleBoard }
 

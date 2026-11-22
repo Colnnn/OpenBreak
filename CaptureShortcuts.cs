@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal readonly record struct CaptureShortcut(uint Modifiers, uint Key)
 {
@@ -169,7 +169,7 @@ internal sealed class CaptureOptions(TaskStore store, CaptureBinding binding)
                     ? $"Shortcut active · {active}"
                     : $"{Preferences.Shortcut} is unavailable here. Choose another shortcut or use Capture task in the tray.";
             return binding.HasUnreleasedBindings
-                ? $"{status} Windows couldn’t release a previous shortcut. Quit Afterbreak to release it."
+                ? $"{status} Windows couldn’t release a previous shortcut. Quit OpenBreak to release it."
                 : status;
         }
     }

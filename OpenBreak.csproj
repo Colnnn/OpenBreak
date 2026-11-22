@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <Version>0.1.0</Version>
+    <AssemblyName>OpenBreak</AssemblyName>
+    <AssemblyTitle>OpenBreak</AssemblyTitle>
+    <RootNamespace>OpenBreak</RootNamespace>
+    <Product>OpenBreak</Product>
+    <Version>0.1.1</Version>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
@@ -23,7 +27,7 @@
     <Compile Remove="tests\**\*.cs" />
     <None Update="AssetCredits.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="IncludeAfterbreakXamlInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+  <Target Name="IncludeOpenBreakXamlInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
       <!-- The unpackaged WinUI build generates these resources outside the .NET publish list. -->
       <ResolvedFileToPublish Include="$(TargetDir)$(TargetName).pri">

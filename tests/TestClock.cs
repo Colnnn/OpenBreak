@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class TestClock(DateTimeOffset utc) : TimeProvider
 {

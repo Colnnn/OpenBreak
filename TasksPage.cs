@@ -9,7 +9,7 @@ using Windows.Foundation;
 using Windows.System;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class TasksPage : UserControl
 {
@@ -18,7 +18,7 @@ internal sealed class TasksPage : UserControl
     internal readonly record struct CardFocus(long TaskId, CardAction Action, FocusState State);
     private readonly record struct ActionOrigin(CardFocus Card, long Generation);
 
-    private const string DragFormat = "Afterbreak.BoardTask";
+    private const string DragFormat = "OpenBreak.BoardTask";
     private static readonly (TaskStatus Status, string Label)[] Columns =
     [
         (TaskStatus.ToDo, "To do"),

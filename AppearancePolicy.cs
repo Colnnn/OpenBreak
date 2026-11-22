@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal enum AppearanceTheme { System, Light, Dark }
 internal enum BreakScene { Dusk, Daylight }

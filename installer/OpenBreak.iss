@@ -1,12 +1,20 @@
+; Keep the original installation, single-instance, setup and startup identities for upgrades.
 #define ProductId "Afterbreak.5572F77B-412F-48B5-AD89-247ECE6B356E"
 #define ProductMutex "Local\Afterbreak.NativeStudy"
+#define SetupMutexName "Local\Afterbreak.UserSetup"
 #define InstallPath "{localappdata}\Programs\Afterbreak"
-#define StartLink "{userprograms}\Afterbreak.lnk"
+#define UninstallRegistryPath "Software\Microsoft\Windows\CurrentVersion\Uninstall\" + ProductId + "_is1"
+#define FreshLogValue "OpenBreakOnlyUninstallLog"
+#define StartLink "{userprograms}\OpenBreak"
+#define LegacyStartLink "{userprograms}\Afterbreak.lnk"
+#define AppExecutable "OpenBreak.exe"
 
 [Setup]
 AppId={#ProductId}
-AppName=Afterbreak
+AppName=OpenBreak
 AppVersion={#AppVersion}
+VersionInfoDescription=OpenBreak Setup
+VersionInfoProductName=OpenBreak
 VersionInfoVersion={#AppVersion}.0
 SetupArchitecture=x64
 ArchitecturesAllowed=x64os
@@ -17,16 +25,16 @@ DefaultDirName={#InstallPath}
 DisableDirPage=yes
 UsePreviousAppDir=no
 DisableProgramGroupPage=yes
-DefaultGroupName=Afterbreak
-UninstallDisplayName=Afterbreak
-UninstallDisplayIcon={code:PayloadDirectory}\Afterbreak.exe
+DefaultGroupName=OpenBreak
+UninstallDisplayName=OpenBreak
+UninstallDisplayIcon={code:PayloadDirectory}\{#AppExecutable}
 CreateUninstallRegKey=ConfirmActivation
 UninstallLogMode=append
 AppMutex={#ProductMutex}
-SetupMutex=Local\Afterbreak.UserSetup
+SetupMutex={#SetupMutexName}
 CloseApplications=no
 RestartApplications=no
-OutputBaseFilename=Afterbreak-{#AppVersion}-win-x64-Setup
+OutputBaseFilename=OpenBreak-{#AppVersion}-win-x64-Setup
 Compression=lzma2
 SolidCompression=yes
 
@@ -35,14 +43,14 @@ Source: "{#PayloadRoot}\*"; DestDir: "{code:PayloadDirectory}"; Excludes: "\file
 Source: "{#PayloadRoot}\files.sha256"; DestDir: "{code:PayloadDirectory}"; Flags: ignoreversion; AfterInstall: VerifyInstalledPayload
 
 [Icons]
-Name: "{userprograms}\Afterbreak"; Filename: "{code:PayloadDirectory}\Afterbreak.exe"; WorkingDir: "{code:PayloadDirectory}"; Check: IsPayloadVerified
+Name: "{#StartLink}"; Filename: "{code:PayloadDirectory}\{#AppExecutable}"; WorkingDir: "{code:PayloadDirectory}"; Check: IsPayloadVerified
 
 [Code]
 #include "InstallPolicy.iss"
 
 const
   AppMutexName = '{#ProductMutex}';
-  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#ProductId}_is1';
+  UninstallKey = '{#UninstallRegistryPath}';
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   RunName = '{#ProductId}';
   NotFound = $FFFFFFFF;
@@ -53,7 +61,8 @@ var
   AppMutexHandle: NativeUInt;
   ActiveSlot, ShortcutBackup, PayloadError: String;
   StartupPage: TInputOptionWizardPage;
-  Committed, HadInstall, PayloadVerified, StartupChanged, StartupFailed: Boolean;
+  Committed, HadInstall, OpenBreakOnlyLog, PayloadVerified: Boolean;
+  StartupChanged, StartupFailed, LegacyShortcutCleanupFailed: Boolean;
 
 function FileAttributes(Path: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
@@ -69,7 +78,12 @@ end;
 
 function StartMenuLink: String;
 begin
-  Result := ExpandConstant('{#StartLink}');
+  Result := ExpandConstant('{#StartLink}.lnk');
+end;
+
+function LegacyStartMenuLink: String;
+begin
+  Result := ExpandConstant('{#LegacyStartLink}');
 end;
 
 function PayloadDirectory(Param: String): String;
@@ -104,9 +118,9 @@ begin
   LastError := DLLGetLastError;
   Result := Attributes <> NotFound;
   if Result and ((Attributes and ReparseAttribute) <> 0) then
-    RaiseException('Afterbreak setup cannot use a linked path: ' + Path);
+    RaiseException('OpenBreak setup cannot use a linked path: ' + Path);
   if not Result and (LastError <> 2) and (LastError <> 3) then
-    RaiseException('Afterbreak setup could not inspect: ' + Path);
+    RaiseException('OpenBreak setup could not inspect: ' + Path);
 end;
 
 procedure CheckPathAncestors(Path: String);
@@ -130,15 +144,15 @@ begin
   if not PathExistsChecked(Path) then
     Exit;
   if not DirExists(Path) then
-    RaiseException('Expected an Afterbreak installation directory: ' + Path);
+    RaiseException('Expected an OpenBreak installation directory: ' + Path);
   if not FindFirst(AddBackslash(Path) + '*', Item) then
-    RaiseException('Afterbreak setup could not read: ' + Path);
+    RaiseException('OpenBreak setup could not read: ' + Path);
   try
     repeat
       if (Item.Name <> '.') and (Item.Name <> '..') then begin
         Result := True;
         if (Item.Attributes and ReparseAttribute) <> 0 then
-          RaiseException('Afterbreak setup cannot use a linked path: ' + AddBackslash(Path) + Item.Name);
+          RaiseException('OpenBreak setup cannot use a linked path: ' + AddBackslash(Path) + Item.Name);
         if (Item.Attributes and DirectoryAttribute) <> 0 then
           CheckTree(AddBackslash(Path) + Item.Name);
       end;
@@ -148,13 +162,33 @@ begin
   end;
 end;
 
-function ReadShortcutTarget: String;
+function ReadNormalShortcutTarget(Link: String): String;
 var
   Shell, Shortcut: Variant;
+  Arguments: String;
 begin
   Shell := CreateOleObject('WScript.Shell');
-  Shortcut := Shell.CreateShortcut(StartMenuLink);
-  Result := Shortcut.TargetPath;
+  Shortcut := Shell.CreateShortcut(Link);
+  Arguments := Shortcut.Arguments;
+  Result := '';
+  if Arguments = '' then
+    Result := Shortcut.TargetPath;
+end;
+
+function IsOwnedLegacyShortcut(Link: String): Boolean;
+var
+  Attributes: LongWord;
+begin
+  Result := False;
+  Attributes := FileAttributes(Link);
+  if (Attributes = NotFound) or ((Attributes and (DirectoryAttribute or ReparseAttribute)) <> 0) then
+    Exit;
+  try
+    Result := IsOwnedVersionedExecutable(RootDirectory, '"' + ReadNormalShortcutTarget(Link) + '"',
+      LegacyAppExecutable);
+  except
+    Log('OpenBreak setup could not read the previous Start menu shortcut.');
+  end;
 end;
 
 function OldVersion: String;
@@ -168,7 +202,14 @@ begin
       not ParseInstallVersion(Result, Version) or
       not RegQueryStringValue(HKCU, UninstallKey, 'Inno Setup: App Path', Path) or
       (CompareText(Path, RootDirectory) <> 0)) then
-    RaiseException('Afterbreak could not verify the installed version. Repair the installation before continuing.');
+    RaiseException('OpenBreak could not verify the installed version. Repair the installation before continuing.');
+end;
+
+function HasOpenBreakOnlyLog: Boolean;
+var
+  Marker: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKCU, UninstallKey, '{#FreshLogValue}', Marker) and (Marker = 1);
 end;
 
 function CheckInstallPaths: Boolean;
@@ -177,8 +218,9 @@ begin
   CheckPathAncestors(StartMenuLink);
   if PathExistsChecked(StartMenuLink) and
      (not FileExists(StartMenuLink) or
-      not IsOwnedExecutableCommand(RootDirectory, '"' + ReadShortcutTarget + '"')) then
-    RaiseException('The Afterbreak Start menu shortcut is in use. Move it and retry.');
+      not IsOwnedVersionedExecutable(RootDirectory, '"' + ReadNormalShortcutTarget(StartMenuLink) + '"',
+        '{#AppExecutable}')) then
+    RaiseException('The OpenBreak Start menu shortcut is in use. Move it and retry.');
   Result := CheckTree(RootDirectory);
 end;
 
@@ -197,7 +239,7 @@ begin
     if not PathExistsChecked(Result) then
       Exit;
   end;
-  RaiseException('No unused Afterbreak installation slot is available. Uninstall Afterbreak and retry.');
+  RaiseException('No unused OpenBreak installation slot is available. Uninstall OpenBreak and retry.');
 end;
 
 procedure CheckInstallVersion(RootHasFiles: Boolean);
@@ -210,9 +252,9 @@ begin
     ParseInstallVersion(Existing, Current);
     ParseInstallVersion('{#AppVersion}', Candidate);
     if CompareInstallVersions(Current, Candidate) > 0 then
-      RaiseException('A newer version of Afterbreak is already installed.');
+      RaiseException('A newer version of OpenBreak is already installed.');
   end else if RootHasFiles or FileExists(StartMenuLink) then
-    RaiseException('Setup could not identify an existing Afterbreak installation. Move its files before retrying.');
+    RaiseException('Setup could not identify an existing OpenBreak installation. Move its files before retrying.');
 end;
 
 function InitializeSetup: Boolean;
@@ -229,13 +271,17 @@ end;
 
 procedure InitializeWizard;
 var
-  Command: String;
+  Command, DisplayName: String;
 begin
   StartupPage := CreateInputOptionPage(wpSelectDir, 'Start at sign-in',
-    'Choose whether to register Afterbreak for Windows startup.',
-    'Windows Startup settings can still keep Afterbreak disabled.', False, False);
-  StartupPage.Add('Add Afterbreak to Windows startup');
+    'Choose whether to register OpenBreak for Windows startup.',
+    'Windows Startup settings can still keep OpenBreak disabled.', False, False);
+  StartupPage.Add('Add OpenBreak to Windows startup');
   HadInstall := OldVersion <> '';
+  { Inno recreates the uninstall key. Carry forward the marker only from OpenBreak. }
+  OpenBreakOnlyLog := not HadInstall or
+    (HasOpenBreakOnlyLog and RegQueryStringValue(HKCU, UninstallKey, 'DisplayName', DisplayName) and
+      (CompareText(DisplayName, 'OpenBreak') = 0));
   StartupPage.Values[0] := HadInstall and OwnedStartup(Command);
   StartupPage.CheckListBox.OnClickCheck := @StartupOptionChanged;
 end;
@@ -245,9 +291,9 @@ var
   Backup: String;
 begin
   if (ShortcutBackup = '') and FileExists(StartMenuLink) then begin
-    Backup := ExpandConstant('{tmp}\previous-afterbreak.lnk');
+    Backup := ExpandConstant('{tmp}\previous-openbreak.lnk');
     if not CopyFile(StartMenuLink, Backup, True) then
-      RaiseException('Afterbreak setup could not preserve the previous Start menu shortcut.');
+      RaiseException('OpenBreak setup could not preserve the previous Start menu shortcut.');
     ShortcutBackup := Backup;
   end;
 end;
@@ -257,12 +303,12 @@ begin
   Result := '';
   try
     if CompareText(WizardDirValue, RootDirectory) <> 0 then
-      RaiseException('Afterbreak installs in the current user profile. Remove the custom destination and retry.');
+      RaiseException('OpenBreak installs in the current user profile. Remove the custom destination and retry.');
     CheckInstallVersion(CheckInstallPaths);
     if PathExistsChecked(ActiveSlot) then
-      RaiseException('The Afterbreak installation slot changed. Cancel Setup and retry.');
+      RaiseException('The OpenBreak installation slot changed. Cancel Setup and retry.');
     if not AcquireAppMutex then
-      RaiseException('Quit Afterbreak from its tray icon, then run Setup again.');
+      RaiseException('Quit OpenBreak from its tray icon, then run Setup again.');
     BackUpShortcut;
   except
     Result := GetExceptionMessage;
@@ -279,14 +325,14 @@ begin
   if not FileExists(Manifest) or
      (CompareText(GetSHA256OfFile(Manifest), '{#ManifestHash}') <> 0) or
      not LoadStringsFromFile(Manifest, Lines) then
-    RaiseException('Afterbreak setup could not verify the installed files.');
+    RaiseException('OpenBreak setup could not verify the installed files.');
   for Index := 0 to GetArrayLength(Lines) - 1 do begin
     RelativePath := Copy(Lines[Index], 67, Length(Lines[Index]));
     StringChangeEx(RelativePath, '/', '\', True);
     FullPath := AddBackslash(ActiveSlot) + RelativePath;
     if not PathExistsChecked(FullPath) or
        (CompareText(GetSHA256OfFile(FullPath), Copy(Lines[Index], 1, 64)) <> 0) then
-      RaiseException('Afterbreak setup could not verify: ' + RelativePath);
+      RaiseException('OpenBreak setup could not verify: ' + RelativePath);
   end;
 end;
 
@@ -312,24 +358,53 @@ begin
     Apps entry. An exception at this boundary enters Inno's installation rollback. }
   if not PayloadVerified then begin
     if PayloadError = '' then
-      PayloadError := 'Afterbreak setup did not finish verifying the new files.';
+      PayloadError := 'OpenBreak setup did not finish verifying the new files.';
     RaiseException(PayloadError);
   end;
   CheckPathAncestors(StartMenuLink);
   if not FileExists(StartMenuLink) or
-     (CompareText(ReadShortcutTarget, ActiveSlot + '\Afterbreak.exe') <> 0) then
-    RaiseException('Afterbreak setup could not create its Start menu shortcut.');
+     (CompareText(ReadNormalShortcutTarget(StartMenuLink), ActiveSlot + '\{#AppExecutable}') <> 0) then
+    RaiseException('OpenBreak setup could not create its Start menu shortcut.');
   Result := True;
+end;
+
+procedure RetireLegacyShortcut;
+var
+  Link: String;
+begin
+  Link := LegacyStartMenuLink;
+  if OpenBreakOnlyLog then
+    Exit;
+  try
+    CheckPathAncestors(ExtractFileDir(Link));
+    if IsOwnedLegacyShortcut(Link) then
+      LegacyShortcutCleanupFailed := not DeleteFile(Link) and IsOwnedLegacyShortcut(Link);
+  except
+    LegacyShortcutCleanupFailed := True;
+    Log(GetExceptionMessage);
+  end;
+  if LegacyShortcutCleanupFailed then
+    SuppressibleMsgBox('OpenBreak was installed. Setup could not remove the previous Start menu shortcut.',
+      mbError, MB_OK, IDOK);
 end;
 
 procedure CurStepChanged(Step: TSetupStep);
 var
   PreviousCommand: String;
   Owned, Present, RegisterStartup: Boolean;
+  Marker: Cardinal;
 begin
   if Step <> ssPostInstall then
     Exit;
   Committed := True;
+  { Create no uninstall registration before activation. An absent marker is conservative. }
+  Marker := 0;
+  if OpenBreakOnlyLog then
+    Marker := 1;
+  if RegKeyExists(HKCU, UninstallKey) and
+     not RegWriteDWordValue(HKCU, UninstallKey, '{#FreshLogValue}', Marker) then
+    Log('OpenBreak setup could not record the uninstall log origin.');
+  RetireLegacyShortcut;
   Present := RegValueExists(HKCU, RunKey, RunName);
   Owned := OwnedStartup(PreviousCommand);
   RegisterStartup := HadInstall and Owned;
@@ -337,13 +412,13 @@ begin
     RegisterStartup := StartupPage.Values[0];
   if RegisterStartup then begin
     if (not Present) or Owned then
-      StartupFailed := not RegWriteStringValue(HKCU, RunKey, RunName, QuietStartupCommand(ActiveSlot + '\Afterbreak.exe'))
+      StartupFailed := not RegWriteStringValue(HKCU, RunKey, RunName, QuietStartupCommand(ActiveSlot + '\{#AppExecutable}'))
     else
       StartupFailed := True;
   end else if Owned then
     StartupFailed := not RegDeleteValue(HKCU, RunKey, RunName);
   if StartupFailed then
-    SuppressibleMsgBox('Afterbreak was installed. Setup could not update the Windows startup entry.',
+    SuppressibleMsgBox('OpenBreak was installed. Setup could not update the Windows startup entry.',
       mbError, MB_OK, IDOK);
 end;
 
@@ -351,7 +426,9 @@ function GetCustomSetupExitCode: Integer;
 begin
   Result := 0;
   if StartupFailed then
-    Result := 10;
+    Result := 10
+  else if LegacyShortcutCleanupFailed then
+    Result := 11;
 end;
 
 procedure DeinitializeSetup;
@@ -359,9 +436,9 @@ begin
   if not Committed and (ShortcutBackup <> '') then begin
     CheckPathAncestors(StartMenuLink);
     if not PathExistsChecked(StartMenuLink) or
-       (CompareText(ReadShortcutTarget, ActiveSlot + '\Afterbreak.exe') = 0) then begin
+       (CompareText(ReadNormalShortcutTarget(StartMenuLink), ActiveSlot + '\{#AppExecutable}') = 0) then begin
       if not CopyFile(ShortcutBackup, StartMenuLink, False) then
-        MsgBox('Setup could not restore the previous Afterbreak Start menu shortcut.', mbError, MB_OK);
+        MsgBox('Setup could not restore the previous OpenBreak Start menu shortcut.', mbError, MB_OK);
     end;
   end;
   if AppMutexHandle <> 0 then
@@ -370,17 +447,21 @@ end;
 
 procedure CurUninstallStepChanged(Step: TUninstallStep);
 var
-  Command: String;
+  Command, LegacyLink: String;
 begin
   if Step <> usUninstall then
     Exit;
   if CompareText(ExpandConstant('{app}'), RootDirectory) <> 0 then
-    RaiseException('Afterbreak could not verify the uninstall location.');
+    RaiseException('OpenBreak could not verify the uninstall location.');
   CheckInstallPaths;
+  { An inherited uninstall log can still delete the old link by name. }
+  LegacyLink := LegacyStartMenuLink;
+  if not HasOpenBreakOnlyLog and PathExistsChecked(LegacyLink) and not IsOwnedLegacyShortcut(LegacyLink) then
+    RaiseException('The previous Start menu shortcut name is in use. Move the shortcut and retry.');
   if not AcquireAppMutex then
-    RaiseException('Quit Afterbreak from its tray icon, then uninstall again.');
+    RaiseException('Quit OpenBreak from its tray icon, then uninstall again.');
   if OwnedStartup(Command) and not RegDeleteValue(HKCU, RunKey, RunName) then
-    RaiseException('Afterbreak could not remove its Windows startup entry.');
+    RaiseException('OpenBreak could not remove its Windows startup entry.');
 end;
 
 procedure DeinitializeUninstall;

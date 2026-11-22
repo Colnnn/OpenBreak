@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class FloatingTimerWindow : Window
 {
@@ -27,7 +27,7 @@ internal sealed class FloatingTimerWindow : Window
         this.hideForSession = hideForSession;
         this.savePosition = savePosition;
         this.position = position;
-        Title = "Afterbreak · Floating timer";
+        Title = "OpenBreak · Floating timer";
         var hide = new Button
         {
             Content = "\u00d7",

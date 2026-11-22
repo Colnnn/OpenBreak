@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
-internal sealed partial class AfterbreakSession
+internal sealed partial class OpenBreakSession
 {
     private static readonly TimeSpan PreviewLength = TimeSpan.FromSeconds(10);
     private readonly Desktop desktop;
@@ -32,7 +32,7 @@ internal sealed partial class AfterbreakSession
     private nint returnWindow;
     private MainWindow.FocusBookmark? captureFocus;
 
-    internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
+    internal OpenBreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
         TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null,
         Action? playBreakCue = null)
     {

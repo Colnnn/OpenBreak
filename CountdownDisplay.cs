@@ -1,4 +1,4 @@
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal readonly record struct CountdownDisplay(string Phase, string Time, string? Glyphs, bool FinalMinute)
 {

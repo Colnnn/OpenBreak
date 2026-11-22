@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.UI.Dispatching;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class PlacementLifecycleChecks
 {
@@ -17,12 +17,12 @@ internal static class PlacementLifecycleChecks
     private static void Manual(string path)
     {
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, new TaskStore(path));
+        var session = new OpenBreakSession(queue, () => { }, new TaskStore(path));
         var tray = Desktop.Current;
         var capture = CaptureWindow.Current;
         var warning = WarningWindow.Current;
         var overlay = BreakWindow.Current;
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Check the preview clock before updating this test.");
 
         void ElapsePreview()
@@ -92,10 +92,10 @@ internal static class PlacementLifecycleChecks
         var store = new TaskStore(Path.Combine(directory, "diagnostic-preview.db"));
         store.Add("Private diagnostic fixture task title");
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store, diagnostics: diagnostics);
+        var session = new OpenBreakSession(queue, () => { }, store, diagnostics: diagnostics);
         var tray = Desktop.Current;
         tray.Send(TrayCommand.Preview);
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
         startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
         queue.Timer.Fire();
         tray.CheckSystemPause = () => tray.LastPresentationCheck ? ReminderPause.Presentation : ReminderPause.None;
@@ -121,10 +121,10 @@ internal static class PlacementLifecycleChecks
     private static void PreviewWithoutForeground(string path)
     {
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, new TaskStore(path));
+        var session = new OpenBreakSession(queue, () => { }, new TaskStore(path));
         var tray = Desktop.Current;
         var overlay = BreakWindow.Current;
-        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var startedAt = typeof(OpenBreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
         void TickAt(int seconds)
         {
@@ -189,7 +189,7 @@ internal static class PlacementLifecycleChecks
         var store = new TaskStore(path);
         store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
         var queue = new DispatcherQueue();
-        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        _ = new OpenBreakSession(queue, () => { }, store, clock);
         var tray = Desktop.Current;
         var warning = WarningWindow.Current;
         var overlay = BreakWindow.Current;

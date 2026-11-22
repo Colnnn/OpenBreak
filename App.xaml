@@ -1,5 +1,5 @@
 <Application
-    x:Class="Afterbreak.AfterbreakApp"
+    x:Class="OpenBreak.OpenBreakApp"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Microsoft.UI.Xaml.Controls">
@@ -8,18 +8,18 @@
             <ResourceDictionary.MergedDictionaries>
                 <controls:XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
-            <Style x:Key="AfterbreakSurfaceFrameStyle" TargetType="Border">
+            <Style x:Key="OpenBreakSurfaceFrameStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApplicationPageBackgroundThemeBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
             </Style>
-            <Style x:Key="AfterbreakOpaqueBackdropStyle" TargetType="Border">
+            <Style x:Key="OpenBreakOpaqueBackdropStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApplicationPageBackgroundThemeBrush}" />
             </Style>
-            <Style x:Key="AfterbreakSecondaryLabelStyle" TargetType="TextBlock">
+            <Style x:Key="OpenBreakSecondaryLabelStyle" TargetType="TextBlock">
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
-            <Style x:Key="AfterbreakPanelStyle" TargetType="Border">
+            <Style x:Key="OpenBreakPanelStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />

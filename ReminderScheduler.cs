@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class ReminderDuration
 {

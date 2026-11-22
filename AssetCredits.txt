@@ -1,8 +1,8 @@
-Afterbreak asset credits
+OpenBreak asset credits
 
 Scenery
 Daylight and Dusk are two color variants of an original coastal scene
-drawn in code for Afterbreak. StillBackdrop.cs renders the scene using
+drawn in code for OpenBreak. StillBackdrop.cs renders the scene using
 WinUI shapes and gradients.
 
 Sound
@@ -11,7 +11,7 @@ as PCM by BreakStartSound.cs. No recording or external sound asset is used.
 
 Windows resources
 The interface uses Windows system fonts, including Segoe UI Variable
-Display for the break timer. Afterbreak loads the shared Windows
+Display for the break timer. OpenBreak loads the shared Windows
 information icon from the operating system for its notification icon.
 
 Bundled components

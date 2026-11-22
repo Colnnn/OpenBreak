@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal enum TaskStatus
 {
@@ -15,12 +15,16 @@ internal sealed partial class TaskStore(string path)
 {
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
+    // Keep the original on-disk identity and schema so existing tasks and settings open in place.
+    private const string UserDataDirectory = "Afterbreak";
     private const int ApplicationId = 0x41465442;
     private const int SchemaVersion = 9;
     private const string TaskFields = "id, title, next_step, status";
 
-    internal static TaskStore ForCurrentUser() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Afterbreak", "tasks.db"));
+    internal static string CurrentUserDatabasePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), UserDataDirectory, "tasks.db");
+
+    internal static TaskStore ForCurrentUser() => new(CurrentUserDatabasePath);
 
     internal static bool IsStorageError(Exception error) =>
         error is SqliteException or InvalidDataException or IOException or UnauthorizedAccessException;
@@ -232,7 +236,7 @@ internal sealed partial class TaskStore(string path)
     {
         if (ReadPragma(connection, null, "PRAGMA application_id") != ApplicationId)
         {
-            throw new InvalidDataException("The file is not a supported Afterbreak database.");
+            throw new InvalidDataException("The file is not a supported OpenBreak database.");
         }
 
         var version = ReadPragma(connection, null, "PRAGMA user_version");
@@ -244,7 +248,7 @@ internal sealed partial class TaskStore(string path)
             {
                 if (ReadPragma(connection, transaction, "PRAGMA application_id") != ApplicationId)
                 {
-                    throw new InvalidDataException("The file is not a supported Afterbreak database.");
+                    throw new InvalidDataException("The file is not a supported OpenBreak database.");
                 }
                 using var integrity = Command(connection, transaction, "PRAGMA quick_check(1)");
                 if (integrity.ExecuteScalar() as string != "ok")
@@ -287,7 +291,7 @@ internal sealed partial class TaskStore(string path)
 
         if (version != SchemaVersion)
         {
-            throw new InvalidDataException("The file is not a supported Afterbreak database.");
+            throw new InvalidDataException("The file is not a supported OpenBreak database.");
         }
     }
 

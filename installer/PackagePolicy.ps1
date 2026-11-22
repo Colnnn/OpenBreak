@@ -41,7 +41,7 @@ function Read-PackageText($entry) {
 
 function Expand-VerifiedPackage($zipPath, $expectedSha, $expectedRevision, $destination) {
     Add-Type -AssemblyName System.IO.Compression
-    $root = 'Afterbreak-win-x64/'
+    $root = 'OpenBreak-win-x64/'
     $stream = [IO.File]::OpenRead($zipPath)
     try {
         if ((Get-FileHash -InputStream $stream -Algorithm SHA256).Hash -ne $expectedSha) {
@@ -65,8 +65,8 @@ function Expand-VerifiedPackage($zipPath, $expectedSha, $expectedRevision, $dest
             }
 
             foreach ($required in @('files.sha256', 'source-checksums.sha256', 'dependencies.lock.json', 'build-info.json',
-                'Afterbreak.exe', 'Afterbreak.pri', 'App.xbf', 'coreclr.dll', 'Microsoft.UI.Xaml.dll',
-                'e_sqlite3.dll', 'Afterbreak.deps.json', 'Afterbreak.runtimeconfig.json')) {
+                'OpenBreak.exe', 'OpenBreak.pri', 'App.xbf', 'coreclr.dll', 'Microsoft.UI.Xaml.dll',
+                'e_sqlite3.dll', 'OpenBreak.deps.json', 'OpenBreak.runtimeconfig.json')) {
                 if (-not $files.ContainsKey($required)) { throw "Package is missing $required." }
             }
             $metadata = Read-PackageText $files['build-info.json'] | ConvertFrom-Json

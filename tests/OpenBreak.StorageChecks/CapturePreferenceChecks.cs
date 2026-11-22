@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal static class CapturePreferenceChecks
 {

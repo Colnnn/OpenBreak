@@ -4,7 +4,7 @@ using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 
-namespace Afterbreak;
+namespace OpenBreak;
 
 internal sealed class Desktop : IDisposable
 {
@@ -24,7 +24,7 @@ internal sealed class Desktop : IDisposable
     private const uint NoRepeat = 0x4000;
     private const uint ForegroundEvent = 3;
     private const int MaxTrayAddAttempts = 6;
-    private const string WindowClass = "Afterbreak.Tray";
+    private const string WindowClass = "OpenBreak.Tray";
     private const string ShellFullscreenExclusion = "NonRudeHWND";
     private static readonly SubclassProcedure activationGuard = PreventInputActivation;
 
@@ -74,7 +74,7 @@ internal sealed class Desktop : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
-        window = CreateWindowEx(0, WindowClass, "Afterbreak tray", 0, 0, 0, 0, 0, 0, 0, module, 0);
+        window = CreateWindowEx(0, WindowClass, "OpenBreak tray", 0, 0, 0, 0, 0, 0, 0, module, 0);
         if (window == 0)
         {
             UnregisterClass(WindowClass, module);
@@ -436,8 +436,8 @@ internal sealed class Desktop : IDisposable
             trayAddAttempts++;
         }
 
-        var tip = countdownStatus is { } countdown ? $"Afterbreak · {countdown}" :
-            CaptureBinding.Active is { } active ? $"Afterbreak · {active}" : "Afterbreak · Shortcut unavailable";
+        var tip = countdownStatus is { } countdown ? $"OpenBreak · {countdown}" :
+            CaptureBinding.Active is { } active ? $"OpenBreak · {active}" : "OpenBreak · Shortcut unavailable";
         var result = trayIcon.Apply(countdownDesign, tip, add, (icon, tooltip, changeIcon, changeTip) =>
         {
             var data = IconData();

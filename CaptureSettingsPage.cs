@@ -1,4 +1,6 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
@@ -13,12 +15,13 @@ internal sealed class CaptureSettingsPage : UserControl
     private readonly StackPanel guide = new() { Spacing = 10 };
     private readonly ComboBox breakDisplay = ReminderSettingsPage.CreateBreakDisplaySelector();
     private readonly InfoBar guideError = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
+    private readonly Button? guideBreaks;
     private readonly Func<CaptureShortcut, string?> apply;
     private CaptureShortcut savedShortcut = CaptureShortcut.Default;
     private BreakDisplay savedDisplay;
 
     internal CaptureSettingsPage(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
-        Func<BreakDisplay, string?> saveAndPreview)
+        Func<BreakDisplay, string?> saveAndPreview, Action<ManagementPage>? navigate = null)
     {
         this.apply = apply;
         var title = SurfaceStyle.Label("Capture", 27, FontWeights.SemiBold);
@@ -38,10 +41,19 @@ internal sealed class CaptureSettingsPage : UserControl
         };
 
         var guideTitle = SurfaceStyle.Label("Getting started", 19, FontWeights.SemiBold);
+        AutomationProperties.SetHeadingLevel(guideTitle, AutomationHeadingLevel.Level2);
         guide.Children.Add(guideTitle);
-        guide.Children.Add(BodyText("Press your capture shortcut or choose Capture task from the tray. Enter saves and Escape cancels."));
-        guide.Children.Add(BodyText("Open Tasks to edit and move your tasks. Scheduled breaks start off. Turn them on in Breaks."));
-        guide.Children.Add(BodyText("Closing this window keeps Afterbreak in the tray. Choose Quit Afterbreak there to stop the app."));
+        guide.Children.Add(BodyText("Set your work and break durations in Breaks."));
+        if (navigate is not null)
+        {
+            guideBreaks = GuideLink("Open Breaks", ManagementPage.Breaks);
+            guide.Children.Add(guideBreaks);
+        }
+        guide.Children.Add(BodyText("Choose Add task in Tasks to write a title and an optional next step. Press Enter to save or Escape to cancel. Use your capture shortcut to save a task from another app."));
+        if (navigate is not null)
+        {
+            guide.Children.Add(GuideLink("Open Tasks", ManagementPage.Tasks));
+        }
         guide.Children.Add(breakDisplay);
         guide.Children.Add(BodyText("A 10-second warning comes before the 10-second preview."));
         var preview = new Button { Content = "Save and preview" };
@@ -66,6 +78,7 @@ internal sealed class CaptureSettingsPage : UserControl
             guideError.IsOpen = false;
         };
         guide.Children.Add(discardDisplay);
+        guide.Children.Add(BodyText("When you’re ready for scheduled breaks, choose Start focus on the Focus page. Closing this window keeps Afterbreak running in the tray. Choose Quit Afterbreak from the tray to stop it."));
         var dismiss = new Button { Content = "Got it" };
         dismiss.Click += (_, _) =>
         {
@@ -73,7 +86,7 @@ internal sealed class CaptureSettingsPage : UserControl
             {
                 error.IsOpen = false;
                 ShowGuide(false);
-                openGuide.Focus(FocusState.Programmatic);
+                FocusIfAllowed(openGuide);
             }
             else
             {
@@ -81,11 +94,7 @@ internal sealed class CaptureSettingsPage : UserControl
             }
         };
         guide.Children.Add(dismiss);
-        openGuide.Click += (_, _) =>
-        {
-            ShowGuide(true);
-            breakDisplay.Focus(FocusState.Programmatic);
-        };
+        openGuide.Click += (_, _) => OpenGuide(focus: true);
 
         var form = new StackPanel { Spacing = 12, Margin = new Thickness(20) };
         form.Children.Add(title);
@@ -98,12 +107,37 @@ internal sealed class CaptureSettingsPage : UserControl
         form.Children.Add(openGuide);
         form.Children.Add(guide);
         Content = SurfaceStyle.Scroll(form);
+
+        Button GuideLink(string label, ManagementPage page)
+        {
+            var button = new Button { Content = label };
+            button.Click += (_, _) => navigate?.Invoke(page);
+            return button;
+        }
     }
 
     internal bool GuideVisible => guide.Visibility == Visibility.Visible;
     internal bool IsDirty => chord.Text != savedShortcut.ToString() ||
         (GuideVisible && breakDisplay.SelectedIndex != (int)savedDisplay);
     internal bool HasFocusedEditor => breakDisplay.IsDropDownOpen;
+    internal Func<bool>? CanRestoreFocus { private get; set; }
+
+    internal void OpenGuide(bool focus = false)
+    {
+        ShowGuide(true);
+        if (focus)
+        {
+            FocusIfAllowed(guideBreaks is { } link ? link : breakDisplay);
+        }
+    }
+
+    private void FocusIfAllowed(Control target)
+    {
+        if (CanRestoreFocus?.Invoke() == true)
+        {
+            target.Focus(FocusState.Programmatic);
+        }
+    }
 
     internal void SetPreferences(CapturePreferences preferences, string description, BreakDisplay display)
     {

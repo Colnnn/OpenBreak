@@ -9,7 +9,11 @@ internal enum ManagementPage { Focus, Tasks, Breaks, Capture, Appearance }
 internal sealed class MainWindow : Window
 {
     internal readonly record struct FocusBookmark(ManagementPage Page, TasksPage.CardFocus? Card,
-        Control? Control, FocusState State);
+        Control? Control, FocusState State, long? TaskFocusGeneration = null)
+    {
+        internal bool Matches(ManagementPage currentPage, long taskFocusGeneration) =>
+            Page == currentPage && (TaskFocusGeneration is not long savedGeneration || savedGeneration == taskFocusGeneration);
+    }
 
     private readonly NavigationView navigation = new()
     {
@@ -34,6 +38,7 @@ internal sealed class MainWindow : Window
         Capture = capture;
         Appearance = appearance;
         Tasks.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Tasks;
+        Capture.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Capture;
         Title = "Afterbreak";
 
         var body = new Grid();
@@ -59,6 +64,7 @@ internal sealed class MainWindow : Window
             if (!quitting)
             {
                 args.Cancel = true;
+                Tasks.LeavePage();
                 AppWindow.Hide();
             }
         };
@@ -99,6 +105,15 @@ internal sealed class MainWindow : Window
         SelectPage(page, Handle);
     }
 
+    internal void OpenGettingStarted()
+    {
+        Navigate(ManagementPage.Capture);
+        if (CurrentPage == ManagementPage.Capture)
+        {
+            Capture.OpenGuide(focus: true);
+        }
+    }
+
     internal bool TryShow(nint source, ManagementPage? page = null, bool activate = true)
     {
         if (!SurfaceWindow.TryPlaceOrRecover(this, source, 1140, 760, placed))
@@ -123,13 +138,17 @@ internal sealed class MainWindow : Window
 
     private void SelectPage(ManagementPage page, nint source)
     {
-        if (CurrentPage == ManagementPage.Tasks && Tasks.IsEditing)
+        if (CurrentPage == ManagementPage.Tasks && Tasks.HasModalEditor)
         {
             navigation.SelectedItem = pages[CurrentPage].Item;
             return;
         }
         if (page != CurrentPage)
         {
+            if (CurrentPage == ManagementPage.Tasks)
+            {
+                Tasks.LeavePage();
+            }
             pages[CurrentPage].Content.Visibility = Visibility.Collapsed;
             CurrentPage = page;
             pages[page].Content.Visibility = Visibility.Visible;
@@ -156,22 +175,25 @@ internal sealed class MainWindow : Window
 
     internal FocusBookmark? GetFocusBookmark()
     {
-        if (!AppWindow.IsVisible || navigation.XamlRoot is not { } root ||
-            FocusManager.GetFocusedElement(root) is not Control control)
+        if (!AppWindow.IsVisible || navigation.XamlRoot is not { } root)
         {
             return null;
         }
-        var card = CurrentPage == ManagementPage.Tasks ? Tasks.GetFocusedCard() : null;
-        return new FocusBookmark(CurrentPage, card, card is null ? control : null, control.FocusState);
+        var taskGeneration = CurrentPage == ManagementPage.Tasks ? Tasks.FocusGeneration : (long?)null;
+        if (taskGeneration.HasValue && Tasks.GetFocusedCard() is { } card)
+        {
+            return new FocusBookmark(CurrentPage, card, null, card.State, taskGeneration);
+        }
+        return FocusManager.GetFocusedElement(root) is Control control
+            ? new FocusBookmark(CurrentPage, null, control, control.FocusState, taskGeneration) : null;
     }
 
     internal void NotifyTaskCaptured(FocusBookmark? bookmark)
     {
-        var pageMatches = bookmark is { } saved && saved.Page == CurrentPage;
+        var pageMatches = bookmark?.Matches(CurrentPage, Tasks.FocusGeneration) == true;
         if (AppWindow.IsVisible && CurrentPage == ManagementPage.Tasks)
         {
-            Tasks.RefreshAfterCapture(pageMatches ? bookmark?.Card : null,
-                () => HasForeground && CurrentPage == ManagementPage.Tasks);
+            Tasks.RefreshAfterCapture(pageMatches ? bookmark?.Card : null);
         }
         else
         {

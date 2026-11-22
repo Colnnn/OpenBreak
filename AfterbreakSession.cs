@@ -170,11 +170,12 @@ internal sealed partial class AfterbreakSession
     {
         if (main is null)
         {
-            var focusPage = new FocusPage(ExecuteFocusAction, page => main?.Navigate(page));
+            var focusPage = new FocusPage(ExecuteFocusAction, page => main?.Navigate(page), () => main?.OpenGettingStarted());
             focusPage.SetActionError(reminderActionError);
-            var tasksPage = new TasksPage(tasks, () => Execute(TrayCommand.Capture, desktop.MainHandle));
+            var tasksPage = new TasksPage(tasks);
             var breaksPage = new ReminderSettingsPage(SaveSettings);
-            var capturePage = new CaptureSettingsPage(ApplyCaptureShortcut, captureOptions.DismissGuide, SaveAndPreviewGuide);
+            var capturePage = new CaptureSettingsPage(ApplyCaptureShortcut, captureOptions.DismissGuide,
+                SaveAndPreviewGuide, page => main?.Navigate(page));
             var appearancePage = new AppearanceSettingsPage(SaveAppearance);
             breaksPage.SetForm(reminders.Settings, reminderStorageError);
             breaksPage.SetStatus(desktop.ReminderStatus);

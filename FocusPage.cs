@@ -33,7 +33,7 @@ internal sealed class FocusPage : UserControl
     private FocusSnapshot? current;
     private double textScale = 1;
 
-    internal FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate)
+    internal FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate, Action? openGuide = null)
     {
         AutomationProperties.SetLiveSetting(timer, AutomationLiveSetting.Off);
         startStop = ActionButton(() => startStopAction);
@@ -68,6 +68,12 @@ internal sealed class FocusPage : UserControl
         var body = new StackPanel { Spacing = 16, Margin = new Thickness(24), MaxWidth = 1100 };
         body.Children.Add(Label("Focus", 30, AutomationHeadingLevel.Level1));
         body.Children.Add(error);
+        if (openGuide is not null)
+        {
+            var gettingStarted = new Button { Content = "Getting started" };
+            gettingStarted.Click += (_, _) => openGuide();
+            body.Children.Add(gettingStarted);
+        }
         body.Children.Add(cards);
         Content = SurfaceStyle.Scroll(body);
 

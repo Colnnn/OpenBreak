@@ -199,8 +199,8 @@ internal static class Program
         Check(!queue.Timer.Running && WarningWindow.Shows == 0, "startup stays quiet");
         tray.Send(TrayCommand.Tasks);
         var board = TasksPage.Current;
-        board.AddTask!();
-        Check(capture.IsVisible && !tray.PreviewAvailable, "board Add uses capture and disables previews");
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
+        Check(capture.IsVisible && !tray.PreviewAvailable, "global capture opens over Tasks and disables previews");
         capture.NextStep = "Note without a title";
         var returnsBeforeNoteOnly = SurfaceWindow.Returns;
         Check(!capture.Save("  ", capture.NextStep) && capture.IsVisible && store.List(archived: false).Count == 1 &&
@@ -208,8 +208,8 @@ internal static class Program
             "a next step without a title keeps the draft and creates no task");
         capture.Cancel();
 
-        var edit = new TasksPage.CardFocus(first.Id, TasksPage.CardAction.Edit);
-        board.FocusedCard = edit;
+        var actions = new TasksPage.CardFocus(first.Id, TasksPage.CardAction.Actions);
+        board.FocusedCard = actions;
         tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         Check(capture.Input == "" && capture.NextStep == "", "fresh capture clears both canceled fields");
         capture.Input = "Draft retained across storage failure";
@@ -235,7 +235,7 @@ internal static class Program
         Check(capture.Save(capture.Input, capture.NextStep), "same draft with its next step saves on retry");
         Check(!capture.IsVisible && tray.PreviewAvailable && SurfaceWindow.Returned == MainWindow.Current.Handle && board.Refreshes == 1,
             "successful save returns to board and refreshes it");
-        Check(board.LastRefreshFocus == edit, "retry after a failed save retains the original Edit target");
+        Check(board.LastRefreshFocus == actions, "retry after a failed save retains the original card Actions target");
         var saved = new TaskStore(path).List(archived: false);
         Check(saved.Count == 2 && saved.Single(task => task.Status == TaskStatus.ToDo) is
             { Title: "Draft retained across storage failure", NextStep: "Check the original subtotal" },
@@ -282,13 +282,13 @@ internal static class Program
 
         CheckCaptureFocus(tray, board, capture, store.List(archived: false).Single().Id);
 
-        var trayEdit = new TasksPage.CardFocus(store.List(archived: false)[0].Id, TasksPage.CardAction.Edit);
-        board.FocusedCard = trayEdit;
+        var trayActions = new TasksPage.CardFocus(store.List(archived: false)[0].Id, TasksPage.CardAction.Actions);
+        board.FocusedCard = trayActions;
         var traySelect = tray.OpenTray(MainWindow.Current.Handle);
         board.FocusedCard = null;
         traySelect(TrayCommand.Capture);
         Check(capture.Save("Capture from tray flyout") && !tray.MenuOpen && SurfaceWindow.Returned == MainWindow.Current.Handle &&
-            board.LastRefreshFocus == trayEdit, "tray capture uses the card focus saved before flyout activation");
+            board.LastRefreshFocus == trayActions, "tray capture uses the card focus saved before flyout activation");
 
         Preview();
         BreakWindow.Current.Foreground = false;
@@ -306,23 +306,23 @@ internal static class Program
 
     private static void CheckCaptureFocus(Desktop tray, TasksPage board, CaptureWindow capture, long taskId)
     {
-        var move = new TasksPage.CardFocus(taskId, TasksPage.CardAction.Move);
-        board.FocusedCard = move;
+        var actions = new TasksPage.CardFocus(taskId, TasksPage.CardAction.Actions);
+        board.FocusedCard = actions;
         tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
-        Check(capture.Save("Capture while moving is focused") && board.LastRefreshFocus == move,
-            "capture keeps Move distinct from Edit for the same task");
+        Check(capture.Save("Capture while task Actions is focused") && board.LastRefreshFocus == actions,
+            "capture refresh requests the Actions control for the original task ID");
 
         var refreshes = board.Refreshes;
         tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         capture.Cancel();
         Check(board.Refreshes == refreshes && SurfaceWindow.Returned == MainWindow.Current.Handle, "cancel returns without rebuilding the board");
         board.FocusedCard = null;
-        board.AddTask!();
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         Check(capture.Save("Capture from the board header") && board.LastRefreshFocus is null,
             "capture from the board header after cancel requests no card focus");
 
         const int external = 400;
-        board.FocusedCard = move;
+        board.FocusedCard = actions;
         tray.Send(TrayCommand.Capture, external);
         Check(capture.Save("Capture from another app") && SurfaceWindow.Returned == external && board.LastRefreshFocus is null,
             "capture from another app refreshes the board without requesting board focus");
@@ -650,7 +650,21 @@ internal static class Program
         Check(host.IsVisible && host.LastActivate && host.CurrentPage == ManagementPage.Focus && tray.MainHandle == host.Handle,
             "a normal launch reveals the Focus page in the main window");
 
-        host.Navigate(ManagementPage.Breaks);
+        host.FocusHome.OpenGettingStarted();
+        Check(host.CurrentPage == ManagementPage.Capture && host.Capture.GuideVisible && host.Capture.DismissGuide(),
+            "Getting started opens in the main shell and supports durable dismissal");
+        host.Navigate(ManagementPage.Focus);
+        host.FocusHome.OpenGettingStarted();
+        Check(host.CurrentPage == ManagementPage.Capture && host.Capture.GuideVisible && store.LoadCapturePreferences().GuideDismissed,
+            "the Focus entry reopens an acknowledged guide while retaining its saved preference");
+        host.Capture.NavigateFromGuide(ManagementPage.Tasks);
+        Check(host.CurrentPage == ManagementPage.Tasks && !store.LoadReminders().Settings.Enabled,
+            "the guide opens Tasks without enabling scheduled breaks");
+        host.Navigate(ManagementPage.Focus);
+        host.FocusHome.OpenGettingStarted();
+        host.Capture.NavigateFromGuide(ManagementPage.Breaks);
+        Check(host.CurrentPage == ManagementPage.Breaks && !store.LoadReminders().Settings.Enabled,
+            "the guide opens Breaks and leaves scheduled breaks off");
         var draft = host.Breaks.Draft with { WorkSeconds = 175 };
         host.Breaks.Draft = draft;
         host.Hide();

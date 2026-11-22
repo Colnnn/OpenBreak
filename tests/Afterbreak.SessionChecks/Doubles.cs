@@ -379,9 +379,18 @@ namespace Afterbreak
             Select(page);
         }
 
+        public void OpenGettingStarted()
+        {
+            Navigate(ManagementPage.Capture);
+            if (CurrentPage == ManagementPage.Capture)
+            {
+                Capture.OpenGuide();
+            }
+        }
+
         private void Select(ManagementPage page)
         {
-            if (CurrentPage == ManagementPage.Tasks && Tasks.IsEditing)
+            if (CurrentPage == ManagementPage.Tasks && Tasks.HasModalEditor)
             {
                 return;
             }
@@ -413,31 +422,31 @@ namespace Afterbreak
         public void CloseForQuit() => Close();
     }
 
-    internal sealed class FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate)
+    internal sealed class FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate, Action openGuide)
     {
         public FocusSnapshot Snapshot { get; private set; } = null!;
         public void SetSnapshot(FocusSnapshot snapshot) => Snapshot = snapshot;
         public void SetActionError(string? message) { }
         public string? Execute(FocusAction action) => execute(action);
         public void Navigate(ManagementPage page) => navigate(page);
+        public void OpenGettingStarted() => openGuide();
     }
 
     internal sealed class TasksPage
     {
-        internal enum CardAction { Edit, Move }
+        internal enum CardAction { Actions, Restore }
 
         internal readonly record struct CardFocus(long TaskId, CardAction Action);
 
-        public TasksPage(TaskStore store, Action? addTask = null)
+        public TasksPage(TaskStore store)
         {
             Current = this;
-            AddTask = addTask;
         }
 
         public static TasksPage Current { get; private set; } = null!;
         public int Refreshes { get; private set; }
         public bool IsEditing { get; set; }
-        public Action? AddTask { get; }
+        public bool HasModalEditor { get; set; }
         public CardFocus? FocusedCard { get; set; }
         public CardFocus? LastRefreshFocus { get; private set; }
 
@@ -498,7 +507,7 @@ namespace Afterbreak
     }
 
     internal sealed class CaptureSettingsPage(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
-        Func<BreakDisplay, string?> saveAndPreview)
+        Func<BreakDisplay, string?> saveAndPreview, Action<ManagementPage> navigate)
     {
         public static CaptureSettingsPage Current { get; private set; } = null!;
         public CapturePreferences? Preferences { get; private set; }
@@ -506,6 +515,8 @@ namespace Afterbreak
         public bool IsDirty { get; set; }
         public bool Foreground { get; set; } = true;
         public bool GuideVisible { get; private set; } = true;
+        public void OpenGuide() => GuideVisible = true;
+        public void NavigateFromGuide(ManagementPage page) => navigate(page);
 
         public void SetPreferences(CapturePreferences preferences, string description, BreakDisplay display)
         {

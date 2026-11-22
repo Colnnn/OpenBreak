@@ -22,6 +22,7 @@ internal static class Program
             CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
             CheckAppearanceSettings(Path.Combine(temporary.FullName, "appearance.db"));
             CheckMainNavigation(Path.Combine(temporary.FullName, "unified-shell.db"));
+            CheckLaunchReveal(Path.Combine(temporary.FullName, "launch-reveal.db"));
             PlacementLifecycleChecks.Run(temporary.FullName);
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
@@ -626,6 +627,62 @@ internal static class Program
         tray.Send(TrayCommand.Capture, host.Handle);
         Check(CaptureWindow.Current.Save("Capture after navigation") && host.RestoredFocus?.Page == ManagementPage.Appearance &&
             SurfaceWindow.Returned == host.Handle, "explicit same-window capture reentry takes the new page bookmark");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckLaunchReveal(string path)
+    {
+        var store = new TaskStore(path);
+        var queue = new DispatcherQueue();
+        var session = new AfterbreakSession(queue, () => { }, store);
+        var tray = Desktop.Current;
+        Check(tray.MainHandle == 0 && !queue.Timers[1].Running,
+            "a quiet start leaves the main window unopened with reminders still off");
+        session.RevealFromLaunch();
+        var host = MainWindow.Current;
+        Check(host.IsVisible && host.LastActivate && host.CurrentPage == ManagementPage.Tasks && tray.MainHandle == host.Handle,
+            "a normal launch reveals the Tasks page in the main window");
+
+        host.Navigate(ManagementPage.Breaks);
+        var draft = host.Breaks.Draft with { WorkSeconds = 175 };
+        host.Breaks.Draft = draft;
+        host.Hide();
+        session.RevealFromLaunch();
+        Check(ReferenceEquals(host, MainWindow.Current) && host.IsVisible && host.LastActivate &&
+            host.CurrentPage == ManagementPage.Breaks && host.Breaks.Draft == draft,
+            "a repeated launch reuses the hidden host, its page, and its draft");
+
+        const int captureSource = 801;
+        tray.Send(TrayCommand.Capture, captureSource);
+        var capture = CaptureWindow.Current;
+        capture.Input = "Unsaved capture on repeated launch";
+        host.Hide();
+        session.RevealFromLaunch();
+        Check(host.IsVisible && !host.LastActivate && capture.IsVisible && capture.Input == "Unsaved capture on repeated launch" &&
+            capture.Save(capture.Input) && SurfaceWindow.Returned == captureSource,
+            "repeated launch leaves active capture focused and keeps its original return source");
+
+        var reminders = store.LoadReminders();
+        tray.Send(TrayCommand.Preview);
+        var warningCount = WarningWindow.Shows;
+        session.RevealFromLaunch();
+        Check(host.LastActivate && WarningWindow.Current.IsVisible && WarningWindow.Shows == warningCount &&
+            store.LoadReminders() == reminders, "launch reveal leaves a visible warning and reminder state intact");
+
+        const int breakSource = 802;
+        tray.WorkSource = breakSource;
+        var startedAt = typeof(AfterbreakSession).GetField("startedAt", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        startedAt.SetValue(session, Stopwatch.GetTimestamp() - 11 * Stopwatch.Frequency);
+        queue.Timer.Fire();
+        var breakStart = startedAt.GetValue(session);
+        host.Hide();
+        session.RevealFromLaunch();
+        Check(host.IsVisible && !host.LastActivate && BreakWindow.Current.IsVisible && queue.Timer.Running &&
+            Equals(startedAt.GetValue(session), breakStart) && store.LoadReminders() == reminders,
+            "launch reveal during a break makes no activation request and preserves the countdown");
+        BreakWindow.Current.End();
+        Check(SurfaceWindow.Returned == breakSource && !BreakWindow.Current.IsVisible,
+            "ending the break after a reveal still returns to the original work window");
         tray.Send(TrayCommand.Quit);
     }
 }

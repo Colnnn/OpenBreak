@@ -177,7 +177,7 @@ begin
   CheckPathAncestors(StartMenuLink);
   if PathExistsChecked(StartMenuLink) and
      (not FileExists(StartMenuLink) or
-      not IsOwnedStartupCommand(RootDirectory, '"' + ReadShortcutTarget + '"')) then
+      not IsOwnedExecutableCommand(RootDirectory, '"' + ReadShortcutTarget + '"')) then
     RaiseException('The Afterbreak Start menu shortcut is in use. Move it and retry.');
   Result := CheckTree(RootDirectory);
 end;
@@ -337,7 +337,7 @@ begin
     RegisterStartup := StartupPage.Values[0];
   if RegisterStartup then begin
     if (not Present) or Owned then
-      StartupFailed := not RegWriteStringValue(HKCU, RunKey, RunName, '"' + ActiveSlot + '\Afterbreak.exe"')
+      StartupFailed := not RegWriteStringValue(HKCU, RunKey, RunName, QuietStartupCommand(ActiveSlot + '\Afterbreak.exe'))
     else
       StartupFailed := True;
   end else if Owned then

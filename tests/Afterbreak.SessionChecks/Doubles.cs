@@ -329,6 +329,7 @@ namespace Afterbreak
         public nint GuidePreviewTarget { get; private set; }
         public FocusBookmark? RestoredFocus { get; private set; }
         public int Opens { get; private set; }
+        public bool LastActivate { get; private set; }
         public event Action<ManagementPage>? PageVisited;
 
         public bool DefersReminders => IsVisible && (CurrentPage switch
@@ -340,10 +341,11 @@ namespace Afterbreak
             _ => false,
         });
 
-        public bool TryShow(nint source, ManagementPage? page = null)
+        public bool TryShow(nint source, ManagementPage? page = null, bool activate = true)
         {
             Current = this;
             Opens++;
+            LastActivate = activate;
             if (!IsVisible || page.HasValue || (source != 0 && source != Handle))
             {
                 GuidePreviewTarget = source == 0 ? Handle : source;

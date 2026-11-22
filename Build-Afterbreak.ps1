@@ -211,7 +211,7 @@ try {
         throw "Use .NET SDK $sdkVersion via -DotNetPath or AFTERBREAK_DOTNET."
     }
     if ($Action -eq 'Test') {
-        foreach ($check in @('Placement', 'Reminder', 'Session', 'Storage')) {
+        foreach ($check in @('Placement', 'Reminder', 'Session', 'Storage', 'Launch')) {
             $name = "Afterbreak.${check}Checks"
             $suite = Join-Path $repository "tests\$name\$name.csproj"
             Invoke-Checked $sdk @('restore', $suite, '--locked-mode', '--configfile', $config)

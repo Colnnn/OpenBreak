@@ -170,6 +170,14 @@ internal sealed partial class AfterbreakSession
     {
         // An explicit reveal can interrupt the display without losing scheduled break time.
         DismissBreakForSettings();
+        ShowMain(source, page, activate: true);
+    }
+
+    internal void RevealFromLaunch() =>
+        ShowMain(desktop.WorkWindow(), page: null, activate: visible is not (Surface.Capture or Surface.Preview));
+
+    private void ShowMain(nint source, ManagementPage? page, bool activate)
+    {
         if (main is null)
         {
             var tasksPage = new TasksPage(tasks, () => Execute(TrayCommand.Capture, desktop.MainHandle));
@@ -185,7 +193,7 @@ internal sealed partial class AfterbreakSession
             desktop.MainHandle = main.Handle;
             appearance.Track(main, SurfaceMaterial.Mica);
         }
-        main.TryShow(source, page);
+        main.TryShow(source, page, activate);
     }
 
     private void RefreshPageAfterLoadFailure(ManagementPage page)

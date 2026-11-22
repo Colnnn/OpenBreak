@@ -1,3 +1,6 @@
+const
+  QuietStartupSuffix = ' --startup';
+
 type
   TInstallVersion = record
     Major, Minor, Patch: Integer;
@@ -41,7 +44,7 @@ begin
     Result := A.Patch - B.Patch;
 end;
 
-function IsOwnedStartupCommand(InstallRoot, Command: String): Boolean;
+function IsOwnedExecutableCommand(InstallRoot, Command: String): Boolean;
 var
   Prefix, Suffix, Relative: String;
   Separator, Slot: Integer;
@@ -59,4 +62,20 @@ begin
     Exit;
   Result := TryVersionNumber(Copy(Relative, Separator + 1, Length(Relative)), Slot) and
     (Slot >= 1) and (Slot <= 1000);
+end;
+
+function IsOwnedStartupCommand(InstallRoot, Command: String): Boolean;
+var
+  SuffixStart: Integer;
+begin
+  SuffixStart := Length(Command) - Length(QuietStartupSuffix) + 1;
+  if (SuffixStart > 0) and
+     (CompareStr(Copy(Command, SuffixStart, Length(QuietStartupSuffix)), QuietStartupSuffix) = 0) then
+    Delete(Command, SuffixStart, Length(QuietStartupSuffix));
+  Result := IsOwnedExecutableCommand(InstallRoot, Command);
+end;
+
+function QuietStartupCommand(ExecutablePath: String): String;
+begin
+  Result := '"' + ExecutablePath + '"' + QuietStartupSuffix;
 end;

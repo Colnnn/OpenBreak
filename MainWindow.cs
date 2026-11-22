@@ -96,7 +96,7 @@ internal sealed class MainWindow : Window
         SelectPage(page, Handle);
     }
 
-    internal bool TryShow(nint source, ManagementPage? page = null)
+    internal bool TryShow(nint source, ManagementPage? page = null, bool activate = true)
     {
         if (!SurfaceWindow.TryPlaceOrRecover(this, source, 1140, 760, placed))
         {
@@ -107,10 +107,13 @@ internal sealed class MainWindow : Window
         var opening = !AppWindow.IsVisible;
         var origin = opening || page.HasValue || (source != 0 && source != Handle) ? source : GuideSource;
         SelectPage(requested, origin);
-        Activate();
-        if (!AppWindow.IsVisible)
+        if (activate)
         {
-            AppWindow.Show();
+            SurfaceWindow.ShowAndActivate(this);
+        }
+        else if (!AppWindow.IsVisible)
+        {
+            AppWindow.Show(activateWindow: false);
         }
         return true;
     }

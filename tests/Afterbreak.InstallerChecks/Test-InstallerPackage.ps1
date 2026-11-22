@@ -78,6 +78,18 @@ function Expand-Fixture($path) {
 }
 
 try {
+    $launchSource = Get-Content (Join-Path $repo 'LaunchPipe.cs') -Raw
+    $startupPolicy = Get-Content (Join-Path $repo 'installer\InstallPolicy.iss') -Raw
+    $setupSource = Get-Content (Join-Path $repo 'installer\Afterbreak.iss') -Raw
+    $flag = [regex]::Match($launchSource, 'StartupFlag = "([^"]+)";').Groups[1].Value
+    $suffix = [regex]::Match($startupPolicy, "QuietStartupSuffix = '([^']+)';").Groups[1].Value
+    $startLink = [regex]::Match($setupSource, '(?ms)^\[Icons\]\r?\n(.*?)^\[Code\]').Groups[1].Value
+    if (!$flag -or $suffix -cne " $flag" -or !$startLink -or $startLink -match '\bParameters\s*:' -or
+        $setupSource -notmatch 'RegWriteStringValue\(HKCU, RunKey, RunName, QuietStartupCommand\(') {
+        throw 'The installer must pass the quiet launch flag only for the startup registration.'
+    }
+    Write-Host 'PASS installer source keeps the Start Menu launch normal and the Run launch quiet'
+
     $good = New-Fixture 'good'
     $verified = Expand-Fixture $good
     if ($verified.revision -ne $revision -or $verified.fileCount -ne 13 -or

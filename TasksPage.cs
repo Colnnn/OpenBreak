@@ -10,7 +10,7 @@ using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
 
-internal sealed class BoardWindow : Window
+internal sealed class TasksPage : UserControl
 {
     internal enum CardAction { Edit, Move, Restore }
 
@@ -38,8 +38,6 @@ internal sealed class BoardWindow : Window
     private readonly List<StackPanel> cardActions = [];
     private readonly Border[] lanes = new Border[Columns.Length];
     private bool archived;
-    private bool placed;
-    private bool quitting;
     private bool editing;
     private bool lanesStacked;
     private long? draggedTask;
@@ -47,10 +45,9 @@ internal sealed class BoardWindow : Window
     private ElementTheme dialogTheme;
     private ContentDialog? activeDialog;
 
-    internal BoardWindow(TaskStore store, Action? addTask = null)
+    internal TasksPage(TaskStore store, Action? addTask = null)
     {
         this.store = store;
-        Title = "Afterbreak · Tasks";
 
         heading = SurfaceStyle.Label("Tasks", 30, FontWeights.SemiBold);
         heading.TextWrapping = TextWrapping.Wrap;
@@ -118,18 +115,10 @@ internal sealed class BoardWindow : Window
         root.Children.Add(scroll);
         Content = root;
 
-        AppWindow.Closing += (_, args) =>
-        {
-            if (!quitting)
-            {
-                args.Cancel = true;
-                AppWindow.Hide();
-            }
-        };
     }
 
-    internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
     internal bool IsEditing => editing;
+    internal Func<bool>? CanRestoreFocus { private get; set; }
 
     internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
     {
@@ -162,27 +151,7 @@ internal sealed class BoardWindow : Window
 
     private Orientation CardActionOrientation => textScale >= 1.5 ? Orientation.Vertical : Orientation.Horizontal;
 
-    internal void Show(nint source)
-    {
-        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 1020, 660, placed))
-        {
-            return;
-        }
-        placed = true;
-
-        Refresh();
-        Activate();
-        if (!AppWindow.IsVisible)
-        {
-            AppWindow.Show();
-        }
-    }
-
-    internal void CloseForQuit()
-    {
-        quitting = true;
-        Close();
-    }
+    internal void CloseEditor() => activeDialog?.Hide();
 
     internal CardFocus? GetFocusedCard()
     {
@@ -200,7 +169,7 @@ internal sealed class BoardWindow : Window
         return null;
     }
 
-    internal void RefreshAfterCapture(CardFocus? previousFocus)
+    internal void RefreshAfterCapture(CardFocus? previousFocus, Func<bool> canFocus)
     {
         Refresh();
         if (previousFocus is { } card)
@@ -208,7 +177,7 @@ internal sealed class BoardWindow : Window
             var key = (card.TaskId, card.Action);
             var focus = taskActions.GetValueOrDefault(key, archiveButton);
             var state = card.State == FocusState.Keyboard ? FocusState.Keyboard : FocusState.Programmatic;
-            FocusWhenReady(focus, state, () => !editing && AppWindow.IsVisible && Desktop.IsForeground(Handle) &&
+            FocusWhenReady(focus, state, () => !editing && canFocus() &&
                 ReferenceEquals(taskActions.GetValueOrDefault(key, archiveButton), focus));
         }
     }
@@ -436,7 +405,13 @@ internal sealed class BoardWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
         };
-        dialog.Opened += (_, _) => title.Focus(FocusState.Programmatic);
+        dialog.Opened += (_, _) =>
+        {
+            if (CanRestoreFocus?.Invoke() == true)
+            {
+                title.Focus(FocusState.Programmatic);
+            }
+        };
         dialog.PrimaryButtonClick += (_, args) =>
         {
             if (string.IsNullOrWhiteSpace(title.Text))
@@ -492,8 +467,11 @@ internal sealed class BoardWindow : Window
     private void RefreshAndFocus(long? id)
     {
         Refresh();
-        var focus = id is long taskId ? taskActions.GetValueOrDefault((taskId, CardAction.Move), archiveButton) : archiveButton;
-        FocusWhenReady(focus, FocusState.Programmatic);
+        Control CurrentAction() => id is long taskId
+            ? taskActions.GetValueOrDefault((taskId, CardAction.Move), archiveButton) : archiveButton;
+        var focus = CurrentAction();
+        FocusWhenReady(focus, FocusState.Programmatic,
+            () => CanRestoreFocus?.Invoke() == true && ReferenceEquals(CurrentAction(), focus));
     }
 
     private static void FocusWhenReady(Control focus, FocusState state, Func<bool>? canFocus = null)

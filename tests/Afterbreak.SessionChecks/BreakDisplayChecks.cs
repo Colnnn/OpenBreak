@@ -65,10 +65,10 @@ internal static class BreakDisplayChecks
         tray.Send(TrayCommand.EndBreak);
 
         tray.Send(TrayCommand.Settings);
-        var settings = SettingsWindow.Current;
+        var settings = ReminderSettingsPage.Current;
         Check(settings.LoadedSettings is { BreakDisplay: BreakDisplay.SavedTaskBoard } configured &&
             settings.Save(configured with { BreakDisplay = BreakDisplay.OneTask }), "settings switch the view to One task");
-        settings.Hide();
+        MainWindow.Current.Hide();
         tray.Send(TrayCommand.Preview);
         ExpireWarning(session, queue);
         Check(BreakWindow.Layout == BreakLayout.Compact && BreakWindow.SavedTasks is null &&
@@ -89,10 +89,10 @@ internal static class BreakDisplayChecks
         tray.Send(TrayCommand.EndBreak);
 
         tray.Send(TrayCommand.Settings);
-        settings = SettingsWindow.Current;
+        settings = ReminderSettingsPage.Current;
         Check(settings.Save(settings.LoadedSettings! with { BreakDisplay = BreakDisplay.SavedTaskBoard }),
             "settings can restore the default board view");
-        settings.Hide();
+        MainWindow.Current.Hide();
         foreach (var task in snapshot)
         {
             store.SetArchived(task.Id, archived: true);
@@ -135,11 +135,11 @@ internal static class BreakDisplayChecks
         Tick(3);
         Check(BreakWindow.Current.Seconds == 27, "the scheduler reaches a partial short break");
         tray.Send(TrayCommand.Settings);
-        var form = SettingsWindow.Current;
+        var form = ReminderSettingsPage.Current;
         Check(form.Save(settings with { BreakDisplay = BreakDisplay.OneTask }) && !BreakWindow.Current.IsVisible &&
             store.LoadReminders().Checkpoint is { CompletedShorts: 2, Phase: ReminderPhase.Warning },
             "a display-only save during Settings preserves cadence and defers the interrupted break");
-        form.Hide();
+        MainWindow.Current.Hide();
         timer.Fire();
         Tick(10);
         Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 27 &&
@@ -158,7 +158,7 @@ internal static class BreakDisplayChecks
         var (_, _, tray) = Open(store, new TestClock(Start));
         var before = File.ReadAllBytes(path);
         tray.Send(TrayCommand.Settings);
-        Check(!SettingsWindow.Current.Save(ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly }) &&
+        Check(!ReminderSettingsPage.Current.Save(ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly }) &&
             File.ReadAllBytes(path).SequenceEqual(before), "a corrupt display setting cannot be replaced by saving fallback settings");
         tray.Send(TrayCommand.Quit);
     }
@@ -170,13 +170,12 @@ internal static class BreakDisplayChecks
         var tasks = store.List(archived: false);
         var (session, queue, tray) = Open(store, new TestClock(Start));
         tray.Send(TrayCommand.CaptureSettings, 101);
-        var guide = CaptureSettingsWindow.Current;
+        var guide = CaptureSettingsPage.Current;
         Check(guide.Display == BreakDisplay.SavedTaskBoard && store.LoadReminders().Checkpoint is null,
             "first Getting started shows the default break display without writing settings");
 
-        tray.Send(TrayCommand.CaptureSettings, 102);
         WarningWindow.Current.CanPlace = false;
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && MainWindow.Current.IsVisible &&
             store.LoadReminders().Checkpoint is null && !WarningWindow.Current.IsVisible,
             "guide warning placement failure keeps the guide and leaves the choice unsaved");
         WarningWindow.Current.CanPlace = true;
@@ -188,8 +187,8 @@ internal static class BreakDisplayChecks
 
         tray.Send(TrayCommand.Settings);
         Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && store.LoadReminders().Checkpoint is null,
-            "the guide cannot overwrite a choice while Reminder settings has an open draft");
-        SettingsWindow.Current.Hide();
+            "a callback from the inactive guide cannot save or preview");
+        tray.Send(TrayCommand.CaptureSettings, 101);
 
         tray.Send(TrayCommand.Capture);
         Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && CaptureWindow.Current.IsVisible,
@@ -203,7 +202,7 @@ internal static class BreakDisplayChecks
         ExecuteSql(path, """
             CREATE TRIGGER ignore_guide_insert BEFORE INSERT ON reminder_state BEGIN SELECT RAISE(IGNORE); END;
             """);
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && MainWindow.Current.IsVisible &&
             !WarningWindow.Current.IsVisible && store.LoadReminders().Checkpoint is null,
             "a suppressed first guide write reports failure and starts no warning");
         ExecuteSql(path, "DROP TRIGGER ignore_guide_insert;");
@@ -218,7 +217,7 @@ internal static class BreakDisplayChecks
             return ReminderPause.None;
         };
         var returns = SurfaceWindow.Returns;
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && MainWindow.Current.IsVisible &&
             !WarningWindow.Current.IsVisible && SurfaceWindow.Returns == returns &&
             store.LoadReminders().Settings == ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly },
             "loss of guide foreground after saving keeps the draft and never restores or previews");
@@ -226,12 +225,12 @@ internal static class BreakDisplayChecks
         guide.Foreground = true;
 
         WarningWindow.Current.CanShowPrepared = false;
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && MainWindow.Current.IsVisible &&
             !WarningWindow.Current.IsVisible && SurfaceWindow.Returns == returns && tray.PreviewAvailable,
             "a warning that fails to open leaves the guide available for retry");
         WarningWindow.Current.CanShowPrepared = true;
 
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is null && !guide.IsVisible &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is null && !MainWindow.Current.IsVisible &&
             WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10 && WarningWindow.Current.LastSource == 101 &&
             SurfaceWindow.Returned == 101 && SurfaceWindow.Returns == returns + 1 && tray.DismissLabel == "Cancel preview",
             "guide success starts the normal warning and returns to the original opening source");
@@ -252,7 +251,7 @@ internal static class BreakDisplayChecks
 
         (_, queue, tray) = Open(new TaskStore(path), new TestClock(Start));
         tray.Send(TrayCommand.CaptureSettings, 303);
-        Check(CaptureSettingsWindow.Current.Display == BreakDisplay.TimerOnly && !queue.Timers[1].Running,
+        Check(CaptureSettingsPage.Current.Display == BreakDisplay.TimerOnly && !queue.Timers[1].Running,
             "Getting started loads the saved choice after restart while reminders remain off");
         tray.Send(TrayCommand.Quit);
     }
@@ -277,18 +276,24 @@ internal static class BreakDisplayChecks
 
         Tick(18);
         Check(BreakWindow.Current.Seconds == 27, "guide fixture reaches a partial scheduled break");
-        tray.Send(TrayCommand.CaptureSettings);
-        var guide = CaptureSettingsWindow.Current;
+        tray.Send(TrayCommand.Settings);
+        var host = MainWindow.Current;
+        host.Breaks.Draft = settings with { WorkSeconds = 125 };
+        host.Navigate(ManagementPage.Capture);
+        var guide = CaptureSettingsPage.Current;
         var before = store.LoadReminders().Checkpoint;
         ExecuteSql(path, """
             CREATE TRIGGER ignore_guide_write BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(IGNORE); END;
             """);
-        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible && timer.Running &&
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && MainWindow.Current.IsVisible && timer.Running &&
             store.LoadReminders() == (settings, before), "a failed guide save leaves the live schedule and durable reminder state alone");
         ExecuteSql(path, "DROP TRIGGER ignore_guide_write;");
         Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is null &&
             store.LoadReminders() == (settings with { BreakDisplay = BreakDisplay.TimerOnly }, before),
             "guide success persists only the display and leaves the checkpoint untouched");
+        Check(host.IsVisible && WarningWindow.Current.LastSource == host.Handle &&
+            host.Breaks.Draft == settings with { WorkSeconds = 125, BreakDisplay = BreakDisplay.TimerOnly } &&
+            host.Breaks.IsDirty, "in-shell guide preview keeps the host and rebases only the untouched display of an unsaved Breaks draft");
         ExpireWarning(session, queue);
         Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 10,
             "an enabled schedule still gets a ten-second manual guide preview");

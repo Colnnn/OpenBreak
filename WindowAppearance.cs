@@ -123,11 +123,8 @@ internal sealed class WindowAppearance : IDisposable
                 case TrayFlyoutWindow tray:
                     tray.ApplyAppearance(state);
                     break;
-                case BoardWindow board:
-                    board.ApplyAppearance(state, panel.RequestedTheme);
-                    break;
-                case SettingsWindow settings:
-                    settings.ApplyAppearance(state);
+                case MainWindow main:
+                    main.ApplyAppearance(state, panel.RequestedTheme);
                     break;
             }
         };

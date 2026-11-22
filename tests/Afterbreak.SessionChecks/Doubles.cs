@@ -44,10 +44,7 @@ namespace Afterbreak
         public static Desktop Current { get; private set; } = null!;
         public bool Disposed { get; private set; }
         public string? DismissLabel { get; set; }
-        public nint BoardHandle { get; set; }
-        public nint SettingsHandle { get; set; }
-        public nint CaptureSettingsHandle { get; set; }
-        public nint AppearanceHandle { get; set; }
+        public nint MainHandle { get; set; }
         public CaptureBinding CaptureBinding { get; } = new((_, _) => true, _ => true);
         public bool PreviewAvailable { get; set; } = true;
         public bool MenuOpen { get; set; }
@@ -311,28 +308,110 @@ namespace Afterbreak
         }
     }
 
-    internal sealed class BoardWindow : TestSurface
+    internal enum ManagementPage { Tasks, Breaks, Capture, Appearance }
+
+    internal sealed class MainWindow(TasksPage tasks, ReminderSettingsPage breaks,
+        CaptureSettingsPage capture, AppearanceSettingsPage appearance) : TestSurface
+    {
+        internal readonly record struct FocusBookmark(ManagementPage Page, TasksPage.CardFocus? Card);
+
+        public static MainWindow Current { get; private set; } = null!;
+        public TasksPage Tasks { get; } = tasks;
+        public ReminderSettingsPage Breaks { get; } = breaks;
+        public CaptureSettingsPage Capture { get; } = capture;
+        public AppearanceSettingsPage Appearance { get; } = appearance;
+        public ManagementPage CurrentPage { get; private set; }
+        public nint Handle => 300;
+        public bool Foreground { get; set; }
+        public bool HasForeground => IsVisible && Foreground;
+        public bool GuideHasForeground => IsVisible && Capture.Foreground &&
+            CurrentPage == ManagementPage.Capture && Capture.GuideVisible;
+        public nint GuidePreviewTarget { get; private set; }
+        public FocusBookmark? RestoredFocus { get; private set; }
+        public int Opens { get; private set; }
+        public event Action<ManagementPage>? PageVisited;
+
+        public bool DefersReminders => IsVisible && (CurrentPage switch
+        {
+            ManagementPage.Tasks => Tasks.IsEditing,
+            ManagementPage.Breaks => Breaks.IsDirty,
+            ManagementPage.Capture => Capture.IsDirty,
+            ManagementPage.Appearance => Appearance.IsDirty,
+            _ => false,
+        });
+
+        public bool TryShow(nint source, ManagementPage? page = null)
+        {
+            Current = this;
+            Opens++;
+            if (!IsVisible || page.HasValue || (source != 0 && source != Handle))
+            {
+                GuidePreviewTarget = source == 0 ? Handle : source;
+            }
+            IsVisible = true;
+            Select(page ?? CurrentPage);
+            return true;
+        }
+
+        public void Navigate(ManagementPage page)
+        {
+            GuidePreviewTarget = Handle;
+            Select(page);
+        }
+
+        private void Select(ManagementPage page)
+        {
+            if (CurrentPage == ManagementPage.Tasks && Tasks.IsEditing)
+            {
+                return;
+            }
+            CurrentPage = page;
+            PageVisited?.Invoke(page);
+        }
+
+        public FocusBookmark? GetFocusBookmark() => IsVisible
+            ? new FocusBookmark(CurrentPage, CurrentPage == ManagementPage.Tasks ? Tasks.FocusedCard : null) : null;
+
+        public void NotifyTaskCaptured(FocusBookmark? bookmark)
+        {
+            var matched = bookmark is { } saved && saved.Page == CurrentPage;
+            RestoredFocus = matched && IsVisible ? bookmark : null;
+            if (IsVisible && CurrentPage == ManagementPage.Tasks)
+            {
+                Tasks.RefreshAfterCapture(matched ? bookmark?.Card : null);
+            }
+        }
+
+        public void HandOffGuidePreview(nint source)
+        {
+            if (source != Handle && GuideHasForeground)
+            {
+                SurfaceWindow.HideAndReturn(this, source);
+            }
+        }
+
+        public void CloseForQuit() => Close();
+    }
+
+    internal sealed class TasksPage
     {
         internal enum CardAction { Edit, Move }
 
         internal readonly record struct CardFocus(long TaskId, CardAction Action);
 
-        public BoardWindow(TaskStore store, Action? addTask = null)
+        public TasksPage(TaskStore store, Action? addTask = null)
         {
             Current = this;
             AddTask = addTask;
         }
 
-        public static BoardWindow Current { get; private set; } = null!;
+        public static TasksPage Current { get; private set; } = null!;
         public int Refreshes { get; private set; }
-        public nint Handle => 300;
         public bool IsEditing { get; set; }
         public Action? AddTask { get; }
         public CardFocus? FocusedCard { get; set; }
         public CardFocus? LastRefreshFocus { get; private set; }
 
-        public void Show(nint source) => IsVisible = true;
-        public CardFocus? GetFocusedCard() => FocusedCard;
 
         public void RefreshAfterCapture(CardFocus? previousFocus)
         {
@@ -340,61 +419,85 @@ namespace Afterbreak
             LastRefreshFocus = previousFocus;
         }
 
-        public void CloseForQuit() => Close();
     }
 
-    internal sealed class SettingsWindow : TestSurface
+    internal sealed class ReminderSettingsPage
     {
-        public SettingsWindow(Func<ReminderSettings, bool> save)
+        public ReminderSettingsPage(Func<ReminderSettings, bool> save)
         {
-            Save = save;
+            this.save = save;
             Current = this;
         }
 
-        public static SettingsWindow Current { get; private set; } = null!;
-        public Func<ReminderSettings, bool> Save { get; }
-        public nint Handle => 301;
-        public ReminderSettings? LoadedSettings { get; private set; }
+        private readonly Func<ReminderSettings, bool> save;
+        public static ReminderSettingsPage Current { get; private set; } = null!;
+        public ReminderSettings LoadedSettings { get; private set; } = ReminderSettings.Default;
+        public ReminderSettings Draft { get; set; } = ReminderSettings.Default;
+        public bool IsDirty => Draft != LoadedSettings;
 
-        public void Show(nint source, ReminderSettings settings, string description, bool storageError)
+        public void SetForm(ReminderSettings settings, bool storageError) => LoadedSettings = Draft = settings;
+        public void RebaseBreakDisplay(BreakDisplay display)
         {
-            LoadedSettings = settings;
-            IsVisible = true;
+            if (Draft.BreakDisplay == LoadedSettings.BreakDisplay)
+            {
+                Draft = Draft with { BreakDisplay = display };
+            }
+            LoadedSettings = LoadedSettings with { BreakDisplay = display };
+        }
+
+        public bool Save(ReminderSettings settings)
+        {
+            Draft = settings;
+            if (!save(Draft))
+            {
+                return false;
+            }
+            LoadedSettings = Draft;
+            return true;
         }
 
         public void SetStatus(string description) { }
-        public void CloseForQuit() => Close();
     }
 
-    internal sealed class CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
-        Func<BreakDisplay, string?> saveAndPreview) : TestSurface
+    internal sealed class CaptureSettingsPage(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
+        Func<BreakDisplay, string?> saveAndPreview)
     {
-        public static CaptureSettingsWindow Current { get; private set; } = null!;
-        public nint Handle => 302;
-        public Func<CaptureShortcut, string?> Apply { get; } = apply;
-        public Func<bool> DismissGuide { get; } = dismissGuide;
-        public Func<BreakDisplay, string?> SaveAndPreview { get; } = saveAndPreview;
+        public static CaptureSettingsPage Current { get; private set; } = null!;
         public CapturePreferences? Preferences { get; private set; }
-        public nint PreviewSource { get; private set; }
         public BreakDisplay Display { get; private set; }
+        public bool IsDirty { get; set; }
         public bool Foreground { get; set; } = true;
-        public bool GuideHasForeground => IsVisible && Foreground;
+        public bool GuideVisible { get; private set; } = true;
 
-        public void Show(nint source, CapturePreferences preferences, string description, BreakDisplay display)
+        public void SetPreferences(CapturePreferences preferences, string description, BreakDisplay display)
         {
             Current = this;
             Preferences = preferences;
-            if (!IsVisible)
-            {
-                PreviewSource = source;
-                Display = display;
-            }
-            IsVisible = true;
+            Display = display;
+            GuideVisible = !preferences.GuideDismissed;
         }
-
-        public void HideForPreview() => SurfaceWindow.HideAndReturn(this, PreviewSource);
+        public string? Apply(CaptureShortcut shortcut)
+        {
+            var result = apply(shortcut);
+            if (result is null && Preferences is not null)
+            {
+                Preferences = Preferences with { Shortcut = shortcut };
+            }
+            return result;
+        }
+        public bool DismissGuide()
+        {
+            if (!dismissGuide() || Preferences is null)
+            {
+                return false;
+            }
+            GuideVisible = false;
+            Preferences = Preferences with { GuideDismissed = true };
+            return true;
+        }
+        public string? SaveAndPreview(BreakDisplay display) => saveAndPreview(display);
+        public void RebaseBreakDisplay(BreakDisplay display) => Display = display;
         public void SetStatus(string description) { }
-        public void CloseForQuit() => Close();
     }
 
     internal sealed class WindowAppearance : IDisposable
@@ -414,20 +517,27 @@ namespace Afterbreak
         public void Dispose() => Disposed = true;
     }
 
-    internal sealed class AppearanceSettingsWindow(Func<AppearancePreferences, bool> save) : TestSurface
+    internal sealed class AppearanceSettingsPage(Func<AppearancePreferences, bool> save)
     {
-        public static AppearanceSettingsWindow Current { get; private set; } = null!;
-        public nint Handle => 303;
-        public Func<AppearancePreferences, bool> Save { get; } = save;
+        public static AppearanceSettingsPage Current { get; private set; } = null!;
         public AppearancePreferences? Preferences { get; private set; }
+        public bool IsDirty { get; set; }
 
-        public void Show(nint source, AppearancePreferences preferences, bool loadFailed)
+        public void SetPreferences(AppearancePreferences preferences, bool loadFailed)
         {
             Current = this;
             Preferences = preferences;
-            IsVisible = true;
         }
 
-        public void CloseForQuit() => Close();
+        public bool Save(AppearancePreferences preferences)
+        {
+            if (!save(preferences))
+            {
+                return false;
+            }
+            SetPreferences(preferences, false);
+            IsDirty = false;
+            return true;
+        }
     }
 }

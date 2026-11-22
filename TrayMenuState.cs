@@ -14,6 +14,7 @@ internal enum TrayCommand
     Skip,
     CaptureSettings,
     Appearance,
+    OpenMain,
 }
 
 internal readonly record struct TrayMenuItem(TrayCommand Command, string Label, bool Visible = true, bool Enabled = true)
@@ -26,14 +27,12 @@ internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview,
 {
     internal TrayMenuItem[] Items() =>
     [
-        new(TrayCommand.Tasks, "Open Tasks"),
+        new(TrayCommand.OpenMain, "Open Afterbreak"),
         new(TrayCommand.Capture, Shortcut is { } shortcut ? $"Capture task · {shortcut}" : "Capture task"),
-        new(TrayCommand.CaptureSettings, "Capture settings"),
-        new(TrayCommand.Appearance, "Appearance"),
         new(TrayCommand.Preview, "Preview a break", Enabled: CanPreview),
         new(TrayCommand.PreviewSampleBoard, "Preview sample board", Enabled: CanPreview),
         new(TrayCommand.EndBreak, DismissLabel ?? "", Visible: DismissLabel is not null),
-        new(TrayCommand.Settings, "Reminder settings"),
+        new(TrayCommand.Settings, "Settings"),
         new(TrayCommand.TogglePause, ManuallyPaused ? "Resume after presentation" : "Pause for presentation"),
         new(TrayCommand.Snooze, "Snooze 5 min", Visible: SnoozeAvailable),
         new(TrayCommand.Skip, "Skip break", Visible: SkipAvailable),

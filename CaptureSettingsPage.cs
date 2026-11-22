@@ -4,27 +4,24 @@ using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
 
-internal sealed class CaptureSettingsWindow : Window
+internal sealed class CaptureSettingsPage : UserControl
 {
     private readonly TextBox chord = new() { Header = "Capture shortcut", MaxLength = 40 };
     private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", 14);
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button openGuide = new() { Content = "Getting started" };
     private readonly StackPanel guide = new() { Spacing = 10 };
-    private readonly ComboBox breakDisplay = SettingsWindow.CreateBreakDisplaySelector();
+    private readonly ComboBox breakDisplay = ReminderSettingsPage.CreateBreakDisplaySelector();
     private readonly InfoBar guideError = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Func<CaptureShortcut, string?> apply;
-    private bool placed;
-    private bool quitting;
-    private bool hiddenForPreview;
+    private CaptureShortcut savedShortcut = CaptureShortcut.Default;
+    private BreakDisplay savedDisplay;
 
-    internal CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
+    internal CaptureSettingsPage(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
         Func<BreakDisplay, string?> saveAndPreview)
     {
         this.apply = apply;
-        Title = "Afterbreak · Capture settings";
-
-        var title = SurfaceStyle.Label("Capture settings", 27, FontWeights.SemiBold);
+        var title = SurfaceStyle.Label("Capture", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         status.TextWrapping = TextWrapping.Wrap;
         var applyButton = new Button { Content = "Apply shortcut" };
@@ -33,12 +30,18 @@ internal sealed class CaptureSettingsWindow : Window
             applyButton.Style = style;
         }
         applyButton.Click += (_, _) => Apply();
+        var discard = new Button { Content = "Discard shortcut changes" };
+        discard.Click += (_, _) =>
+        {
+            chord.Text = savedShortcut.ToString();
+            error.IsOpen = false;
+        };
 
         var guideTitle = SurfaceStyle.Label("Getting started", 19, FontWeights.SemiBold);
         guide.Children.Add(guideTitle);
         guide.Children.Add(BodyText("Press your capture shortcut or choose Capture task from the tray. Enter saves and Escape cancels."));
-        guide.Children.Add(BodyText("Choose Open Tasks from the tray to edit and move your tasks. Scheduled breaks start off. Turn them on in Reminder settings."));
-        guide.Children.Add(BodyText("Closing a window keeps Afterbreak in the tray. Choose Quit Afterbreak there to stop the app."));
+        guide.Children.Add(BodyText("Open Tasks to edit and move your tasks. Scheduled breaks start off. Turn them on in Breaks."));
+        guide.Children.Add(BodyText("Closing this window keeps Afterbreak in the tray. Choose Quit Afterbreak there to stop the app."));
         guide.Children.Add(breakDisplay);
         guide.Children.Add(BodyText("A 10-second warning comes before the 10-second preview."));
         var preview = new Button { Content = "Save and preview" };
@@ -56,6 +59,13 @@ internal sealed class CaptureSettingsWindow : Window
         };
         guide.Children.Add(preview);
         guide.Children.Add(guideError);
+        var discardDisplay = new Button { Content = "Discard display change" };
+        discardDisplay.Click += (_, _) =>
+        {
+            breakDisplay.SelectedIndex = (int)savedDisplay;
+            guideError.IsOpen = false;
+        };
+        guide.Children.Add(discardDisplay);
         var dismiss = new Button { Content = "Got it" };
         dismiss.Click += (_, _) =>
         {
@@ -83,63 +93,23 @@ internal sealed class CaptureSettingsWindow : Window
         form.Children.Add(chord);
         form.Children.Add(BodyText("Type a shortcut such as Ctrl+Shift+K. Use two or three modifiers (Ctrl, Alt, Shift) and a letter, digit or F1–F11."));
         form.Children.Add(applyButton);
+        form.Children.Add(discard);
         form.Children.Add(error);
         form.Children.Add(openGuide);
         form.Children.Add(guide);
         Content = SurfaceStyle.Scroll(form);
-        AppWindow.Closing += (_, args) =>
-        {
-            if (!quitting)
-            {
-                args.Cancel = true;
-                AppWindow.Hide();
-            }
-        };
     }
 
-    internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
-    internal nint PreviewSource { get; private set; }
-    internal bool GuideHasForeground => !quitting && AppWindow.IsVisible && guide.Visibility == Visibility.Visible &&
-        Desktop.IsForeground(Handle);
-
-    internal void Show(nint source, CapturePreferences preferences, string description, BreakDisplay display)
-    {
-        var opening = !AppWindow.IsVisible;
-        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 510, 720, placed))
-        {
-            return;
-        }
-        if (opening)
-        {
-            if (hiddenForPreview)
-            {
-                breakDisplay.SelectedIndex = (int)display;
-                SetStatus(description);
-                hiddenForPreview = false;
-            }
-            else
-            {
-                SetPreferences(preferences, description, display);
-            }
-            PreviewSource = source == Handle ? 0 : source;
-        }
-
-        placed = true;
-        Activate();
-        if (!AppWindow.IsVisible)
-        {
-            AppWindow.Show();
-        }
-        if (opening)
-        {
-            chord.Focus(FocusState.Programmatic);
-            chord.SelectAll();
-        }
-    }
+    internal bool GuideVisible => guide.Visibility == Visibility.Visible;
+    internal bool IsDirty => chord.Text != savedShortcut.ToString() ||
+        (GuideVisible && breakDisplay.SelectedIndex != (int)savedDisplay);
+    internal bool HasFocusedEditor => breakDisplay.IsDropDownOpen;
 
     internal void SetPreferences(CapturePreferences preferences, string description, BreakDisplay display)
     {
-        chord.Text = preferences.Shortcut.ToString();
+        savedShortcut = preferences.Shortcut;
+        savedDisplay = display;
+        chord.Text = savedShortcut.ToString();
         error.IsOpen = false;
         guideError.IsOpen = false;
         breakDisplay.SelectedIndex = (int)display;
@@ -149,20 +119,13 @@ internal sealed class CaptureSettingsWindow : Window
 
     internal void SetStatus(string description) => status.Text = description;
 
-    internal void HideForPreview()
+    internal void RebaseBreakDisplay(BreakDisplay display)
     {
-        hiddenForPreview = true;
-        if (GuideHasForeground)
+        if (breakDisplay.SelectedIndex == (int)savedDisplay)
         {
-            Desktop.ReturnTo(PreviewSource);
+            breakDisplay.SelectedIndex = (int)display;
         }
-        AppWindow.Hide();
-    }
-
-    internal void CloseForQuit()
-    {
-        quitting = true;
-        Close();
+        savedDisplay = display;
     }
 
     private void Apply()
@@ -178,7 +141,8 @@ internal sealed class CaptureSettingsWindow : Window
             Report(failure);
             return;
         }
-        chord.Text = shortcut.ToString();
+        savedShortcut = shortcut;
+        chord.Text = savedShortcut.ToString();
         error.IsOpen = false;
     }
 

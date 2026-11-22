@@ -103,8 +103,8 @@ internal sealed class SimulatedReminderDay(string path)
         QuietFor(new DateTimeOffset(editTime, TimeSpan.Zero) - clock.GetUtcNow());
         Tray.Send(TrayCommand.Settings);
         settings = settings with { EndMinute = 15 * 60 };
-        Require(SettingsWindow.Current.Save(settings), "working-hours change saves");
-        SettingsWindow.Current.Hide();
+        Require(ReminderSettingsPage.Current.Save(settings), "working-hours change saves");
+        MainWindow.Current.Hide();
         scheduler.Fire();
         ExpectWarningAfter(TimeSpan.FromMinutes(30));
         QuietFor(TimeSpan.FromSeconds(9));

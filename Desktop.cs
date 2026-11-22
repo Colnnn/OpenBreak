@@ -91,10 +91,7 @@ internal sealed class Desktop : IDisposable
 
     internal CaptureBinding CaptureBinding { get; }
     internal string? DismissLabel { get; set; }
-    internal nint BoardHandle { get; set; }
-    internal nint SettingsHandle { get; set; }
-    internal nint CaptureSettingsHandle { get; set; }
-    internal nint AppearanceHandle { get; set; }
+    internal nint MainHandle { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
     internal bool MenuOpen => trayMenu.Current is not null;
     internal bool TrayFlyoutHasForeground => MenuOpen && trayFlyout?.HasForeground == true;
@@ -229,11 +226,13 @@ internal sealed class Desktop : IDisposable
 
     internal static void ReturnTo(nint source)
     {
-        if (source != 0 && IsWindow(source) && IsWindowVisible(source) && !IsIconic(source) && GetForegroundWindow() != source)
+        if (CanReturnTo(source) && GetForegroundWindow() != source)
         {
             _ = SetForegroundWindow(source);
         }
     }
+
+    internal static bool CanReturnTo(nint source) => source != 0 && IsWindow(source) && IsWindowVisible(source) && !IsIconic(source);
 
     public void Dispose()
     {
@@ -327,8 +326,7 @@ internal sealed class Desktop : IDisposable
 
     private void ObserveWorkWindow(nint candidate)
     {
-        if (candidate != 0 && (candidate == BoardHandle || candidate == SettingsHandle ||
-            candidate == CaptureSettingsHandle || candidate == AppearanceHandle))
+        if (candidate != 0 && candidate == MainHandle)
         {
             lastOwnWorkWindow = candidate;
         }

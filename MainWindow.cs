@@ -1,0 +1,196 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+
+namespace Afterbreak;
+
+internal enum ManagementPage { Tasks, Breaks, Capture, Appearance }
+
+internal sealed class MainWindow : Window
+{
+    internal readonly record struct FocusBookmark(ManagementPage Page, TasksPage.CardFocus? Card,
+        Control? Control, FocusState State);
+
+    private readonly NavigationView navigation = new()
+    {
+        IsSettingsVisible = false,
+        IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+        PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
+        CompactModeThresholdWidth = 700,
+        ExpandedModeThresholdWidth = 950,
+        OpenPaneLength = 192,
+    };
+    private readonly Dictionary<ManagementPage, (NavigationViewItem Item, UserControl Content)> pages = [];
+    private bool placed;
+    private bool quitting;
+    private bool tasksNeedRefresh = true;
+
+    internal MainWindow(TasksPage tasks, ReminderSettingsPage breaks, CaptureSettingsPage capture,
+        AppearanceSettingsPage appearance)
+    {
+        Tasks = tasks;
+        Breaks = breaks;
+        Capture = capture;
+        Appearance = appearance;
+        Tasks.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Tasks;
+        Title = "Afterbreak";
+
+        var body = new Grid();
+        AddPage(ManagementPage.Tasks, "Tasks", Symbol.List, tasks);
+        navigation.MenuItems.Add(new NavigationViewItemHeader { Content = "Settings" });
+        AddPage(ManagementPage.Breaks, "Breaks", Symbol.Clock, breaks);
+        AddPage(ManagementPage.Capture, "Capture", Symbol.Edit, capture);
+        AddPage(ManagementPage.Appearance, "Appearance", Symbol.Setting, appearance);
+        navigation.Content = body;
+        Content = navigation;
+        navigation.SelectionChanged += (_, args) =>
+        {
+            if (args.SelectedItem is NavigationViewItem { Tag: ManagementPage page } && page != CurrentPage)
+            {
+                Navigate(page);
+            }
+        };
+        navigation.SelectedItem = pages[ManagementPage.Tasks].Item;
+
+        AppWindow.Closing += (_, args) =>
+        {
+            if (!quitting)
+            {
+                args.Cancel = true;
+                AppWindow.Hide();
+            }
+        };
+
+        void AddPage(ManagementPage page, string label, Symbol icon, UserControl content)
+        {
+            var item = new NavigationViewItem { Content = label, Icon = new SymbolIcon(icon), Tag = page };
+            content.Visibility = page == ManagementPage.Tasks ? Visibility.Visible : Visibility.Collapsed;
+            pages.Add(page, (item, content));
+            navigation.MenuItems.Add(item);
+            body.Children.Add(content);
+        }
+    }
+
+    internal TasksPage Tasks { get; }
+    internal ReminderSettingsPage Breaks { get; }
+    internal CaptureSettingsPage Capture { get; }
+    internal AppearanceSettingsPage Appearance { get; }
+    internal ManagementPage CurrentPage { get; private set; }
+    internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+    internal bool HasForeground => AppWindow.IsVisible && Desktop.IsForeground(Handle);
+    internal nint GuideSource { get; private set; }
+    internal bool GuideHasForeground => !quitting && HasForeground && CurrentPage == ManagementPage.Capture && Capture.GuideVisible;
+    internal event Action<ManagementPage>? PageVisited;
+
+    internal bool DefersReminders => AppWindow.IsVisible && (CurrentPage switch
+    {
+        ManagementPage.Tasks => Tasks.IsEditing,
+        ManagementPage.Breaks => Breaks.IsDirty || (HasForeground && Breaks.HasFocusedEditor),
+        ManagementPage.Capture => Capture.IsDirty || (HasForeground && Capture.HasFocusedEditor),
+        ManagementPage.Appearance => Appearance.IsDirty || (HasForeground && Appearance.HasFocusedEditor),
+        _ => false,
+    });
+
+    internal void Navigate(ManagementPage page)
+    {
+        SelectPage(page, Handle);
+    }
+
+    internal bool TryShow(nint source, ManagementPage? page = null)
+    {
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 1140, 760, placed))
+        {
+            return false;
+        }
+        placed = true;
+        var requested = page ?? CurrentPage;
+        var opening = !AppWindow.IsVisible;
+        var origin = opening || page.HasValue || (source != 0 && source != Handle) ? source : GuideSource;
+        SelectPage(requested, origin);
+        Activate();
+        if (!AppWindow.IsVisible)
+        {
+            AppWindow.Show();
+        }
+        return true;
+    }
+
+    private void SelectPage(ManagementPage page, nint source)
+    {
+        if (CurrentPage == ManagementPage.Tasks && Tasks.IsEditing)
+        {
+            navigation.SelectedItem = pages[CurrentPage].Item;
+            return;
+        }
+        if (page != CurrentPage)
+        {
+            pages[CurrentPage].Content.Visibility = Visibility.Collapsed;
+            CurrentPage = page;
+            pages[page].Content.Visibility = Visibility.Visible;
+        }
+        if (page == ManagementPage.Capture)
+        {
+            GuideSource = source == 0 ? Handle : source;
+        }
+        navigation.SelectedItem = pages[page].Item;
+        if (page == ManagementPage.Tasks && tasksNeedRefresh)
+        {
+            Tasks.Refresh();
+            tasksNeedRefresh = false;
+        }
+        PageVisited?.Invoke(page);
+    }
+
+    internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
+    {
+        Tasks.ApplyAppearance(state, theme);
+        Breaks.ApplyAppearance(state);
+    }
+
+    internal FocusBookmark? GetFocusBookmark()
+    {
+        if (!AppWindow.IsVisible || navigation.XamlRoot is not { } root ||
+            FocusManager.GetFocusedElement(root) is not Control control)
+        {
+            return null;
+        }
+        var card = CurrentPage == ManagementPage.Tasks ? Tasks.GetFocusedCard() : null;
+        return new FocusBookmark(CurrentPage, card, card is null ? control : null, control.FocusState);
+    }
+
+    internal void NotifyTaskCaptured(FocusBookmark? bookmark)
+    {
+        var pageMatches = bookmark is { } saved && saved.Page == CurrentPage;
+        if (AppWindow.IsVisible && CurrentPage == ManagementPage.Tasks)
+        {
+            Tasks.RefreshAfterCapture(pageMatches ? bookmark?.Card : null,
+                () => HasForeground && CurrentPage == ManagementPage.Tasks);
+        }
+        else
+        {
+            tasksNeedRefresh = true;
+        }
+        if (HasForeground && pageMatches && bookmark is { Control: { IsLoaded: true } control } focus)
+        {
+            control.Focus(focus.State == FocusState.Keyboard ? FocusState.Keyboard : FocusState.Programmatic);
+        }
+    }
+
+    internal nint GuidePreviewTarget => GuideSource != Handle && Desktop.CanReturnTo(GuideSource) ? GuideSource : Handle;
+
+    internal void HandOffGuidePreview(nint target)
+    {
+        if (target != Handle && GuideHasForeground && Desktop.CanReturnTo(target))
+        {
+            Desktop.ReturnTo(target);
+            AppWindow.Hide();
+        }
+    }
+
+    internal void CloseForQuit()
+    {
+        quitting = true;
+        Tasks.CloseEditor();
+        Close();
+    }
+}

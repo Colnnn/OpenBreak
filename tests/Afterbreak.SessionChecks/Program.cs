@@ -21,6 +21,7 @@ internal static class Program
             CheckFailedStartupRead(Path.Combine(temporary.FullName, "startup.db"));
             CheckCaptureSettings(Path.Combine(temporary.FullName, "capture-settings.db"));
             CheckAppearanceSettings(Path.Combine(temporary.FullName, "appearance.db"));
+            CheckMainNavigation(Path.Combine(temporary.FullName, "unified-shell.db"));
             PlacementLifecycleChecks.Run(temporary.FullName);
             new SimulatedReminderDay(Path.Combine(temporary.FullName, "day.db")).Run();
         }
@@ -77,7 +78,7 @@ internal static class Program
         var state = new TrayMenuState("Ctrl + Alt + K", false, null, "Reminders off", false, false, false);
         var items = state.Items();
         Check(items.Where(item => item.Visible).Select(item => item.Command).SequenceEqual(
-            [TrayCommand.Tasks, TrayCommand.Capture, TrayCommand.CaptureSettings, TrayCommand.Appearance,
+            [TrayCommand.OpenMain, TrayCommand.Capture,
                 TrayCommand.Preview, TrayCommand.PreviewSampleBoard, TrayCommand.Settings, TrayCommand.TogglePause, TrayCommand.Quit]) &&
             items.Single(item => item.Command == TrayCommand.Capture).Label == "Capture task · Ctrl + Alt + K" &&
             !state.CanInvoke(items.Single(item => item.Command == TrayCommand.Preview)),
@@ -189,7 +190,7 @@ internal static class Program
 
         Check(!queue.Timer.Running && WarningWindow.Shows == 0, "startup stays quiet");
         tray.Send(TrayCommand.Tasks);
-        var board = BoardWindow.Current;
+        var board = TasksPage.Current;
         board.AddTask!();
         Check(capture.IsVisible && !tray.PreviewAvailable, "board Add uses capture and disables previews");
         capture.NextStep = "Note without a title";
@@ -199,9 +200,9 @@ internal static class Program
             "a next step without a title keeps the draft and creates no task");
         capture.Cancel();
 
-        var edit = new BoardWindow.CardFocus(first.Id, BoardWindow.CardAction.Edit);
+        var edit = new TasksPage.CardFocus(first.Id, TasksPage.CardAction.Edit);
         board.FocusedCard = edit;
-        tray.Send(TrayCommand.Capture, board.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         Check(capture.Input == "" && capture.NextStep == "", "fresh capture clears both canceled fields");
         capture.Input = "Draft retained across storage failure";
         capture.NextStep = "  Check the original subtotal  ";
@@ -216,7 +217,7 @@ internal static class Program
             tray.Send(TrayCommand.Preview);
             tray.Send(TrayCommand.PreviewSampleBoard);
             board.FocusedCard = null;
-            tray.Send(TrayCommand.Capture, board.Handle);
+            tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
             Check(capture.IsVisible && capture.Input == "Draft retained across storage failure" && capture.Shows == captures
                 && capture.NextStep == "  Check the original subtotal  " && WarningWindow.Shows == warnings && !queue.Timer.Running,
                 "both failed draft fields survive preview commands and capture reinvocation");
@@ -224,7 +225,7 @@ internal static class Program
         }
 
         Check(capture.Save(capture.Input, capture.NextStep), "same draft with its next step saves on retry");
-        Check(!capture.IsVisible && tray.PreviewAvailable && SurfaceWindow.Returned == board.Handle && board.Refreshes == 1,
+        Check(!capture.IsVisible && tray.PreviewAvailable && SurfaceWindow.Returned == MainWindow.Current.Handle && board.Refreshes == 1,
             "successful save returns to board and refreshes it");
         Check(board.LastRefreshFocus == edit, "retry after a failed save retains the original Edit target");
         var saved = new TaskStore(path).List(archived: false);
@@ -273,12 +274,12 @@ internal static class Program
 
         CheckCaptureFocus(tray, board, capture, store.List(archived: false).Single().Id);
 
-        var trayEdit = new BoardWindow.CardFocus(store.List(archived: false)[0].Id, BoardWindow.CardAction.Edit);
+        var trayEdit = new TasksPage.CardFocus(store.List(archived: false)[0].Id, TasksPage.CardAction.Edit);
         board.FocusedCard = trayEdit;
-        var traySelect = tray.OpenTray(board.Handle);
+        var traySelect = tray.OpenTray(MainWindow.Current.Handle);
         board.FocusedCard = null;
         traySelect(TrayCommand.Capture);
-        Check(capture.Save("Capture from tray flyout") && !tray.MenuOpen && SurfaceWindow.Returned == board.Handle &&
+        Check(capture.Save("Capture from tray flyout") && !tray.MenuOpen && SurfaceWindow.Returned == MainWindow.Current.Handle &&
             board.LastRefreshFocus == trayEdit, "tray capture uses the card focus saved before flyout activation");
 
         Preview();
@@ -292,21 +293,21 @@ internal static class Program
         Check(tray.LastPresentationCheck, "explicit Windows eligibility changes still recheck presentation over a tray");
 
         tray.Send(TrayCommand.Quit);
-        Check(didQuit && tray.Disposed && capture.Closed && board.Closed, "quit closes board and capture and disposes desktop");
+        Check(didQuit && tray.Disposed && capture.Closed && MainWindow.Current.Closed, "quit closes board and capture and disposes desktop");
     }
 
-    private static void CheckCaptureFocus(Desktop tray, BoardWindow board, CaptureWindow capture, long taskId)
+    private static void CheckCaptureFocus(Desktop tray, TasksPage board, CaptureWindow capture, long taskId)
     {
-        var move = new BoardWindow.CardFocus(taskId, BoardWindow.CardAction.Move);
+        var move = new TasksPage.CardFocus(taskId, TasksPage.CardAction.Move);
         board.FocusedCard = move;
-        tray.Send(TrayCommand.Capture, board.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         Check(capture.Save("Capture while moving is focused") && board.LastRefreshFocus == move,
             "capture keeps Move distinct from Edit for the same task");
 
         var refreshes = board.Refreshes;
-        tray.Send(TrayCommand.Capture, board.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         capture.Cancel();
-        Check(board.Refreshes == refreshes && SurfaceWindow.Returned == board.Handle, "cancel returns without rebuilding the board");
+        Check(board.Refreshes == refreshes && SurfaceWindow.Returned == MainWindow.Current.Handle, "cancel returns without rebuilding the board");
         board.FocusedCard = null;
         board.AddTask!();
         Check(capture.Save("Capture from the board header") && board.LastRefreshFocus is null,
@@ -318,7 +319,7 @@ internal static class Program
         Check(capture.Save("Capture from another app") && SurfaceWindow.Returned == external && board.LastRefreshFocus is null,
             "capture from another app refreshes the board without requesting board focus");
 
-        tray.Send(TrayCommand.Capture, board.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         tray.Send(TrayCommand.Capture, external);
         Check(capture.Save("Capture switched to another app") && SurfaceWindow.Returned == external && board.LastRefreshFocus is null,
             "changing the capture return window clears the old card focus");
@@ -357,9 +358,9 @@ internal static class Program
         var warnings = WarningWindow.Shows;
         tray.Send(TrayCommand.Preview);
         tray.Send(TrayCommand.Settings);
-        Check(WarningWindow.Shows == warnings + 1 && !queue.Timer.Running && SettingsWindow.Current.IsVisible,
+        Check(WarningWindow.Shows == warnings + 1 && !queue.Timer.Running && MainWindow.Current.IsVisible,
             "opening settings cancels a manual preview before an overlay can appear");
-        var settings = SettingsWindow.Current;
+        var settings = ReminderSettingsPage.Current;
         using (var blocker = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
         {
             blocker.Open();
@@ -369,18 +370,17 @@ internal static class Program
         }
         Check(settings.Save(enabled) && schedulerTimer.Running, "successful opt-in starts the scheduler");
         warnings = WarningWindow.Shows;
-        tray.Send(TrayCommand.Capture, settings.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         capture.Input = "Settings capture draft";
         TickSeconds(8);
-        Check(WarningWindow.Shows == warnings && capture.Input == "Settings capture draft" && settings.IsVisible,
+        Check(WarningWindow.Shows == warnings && capture.Input == "Settings capture draft" && MainWindow.Current.IsVisible,
             "capture and settings defer production warnings without losing drafts");
-        Check(capture.Save(capture.Input) && SurfaceWindow.Returned == settings.Handle,
+        Check(capture.Save(capture.Input) && SurfaceWindow.Returned == MainWindow.Current.Handle,
             "capture returns to a still-open settings window");
 
         tray.Send(TrayCommand.Tasks);
-        var board = BoardWindow.Current;
+        var board = TasksPage.Current;
         board.IsEditing = true;
-        settings.Hide();
         TickSeconds(10);
         Check(WarningWindow.Shows == warnings && board.IsEditing, "the board editor keeps production reminders deferred");
         board.IsEditing = false;
@@ -441,11 +441,11 @@ internal static class Program
         Check(tray.ManuallyPaused && store.LoadReminders().Settings == original,
             "a transient startup read failure never overwrites saved settings with fallback defaults");
         tray.Send(TrayCommand.Settings);
-        Check(SettingsWindow.Current.LoadedSettings == original, "opening settings retries the failed load");
+        Check(ReminderSettingsPage.Current.LoadedSettings == original, "opening settings retries the failed load");
         Check(WindowAppearance.Current.Preferences == AppearancePreferences.Default && store.LoadAppearance() == savedAppearance,
             "startup appearance read failure uses temporary defaults without persisting them");
         tray.Send(TrayCommand.Appearance);
-        Check(AppearanceSettingsWindow.Current.Preferences == savedAppearance && WindowAppearance.Current.Preferences == savedAppearance,
+        Check(AppearanceSettingsPage.Current.Preferences == savedAppearance && WindowAppearance.Current.Preferences == savedAppearance,
             "opening Appearance retries the read and restores the complete saved preference pair");
         tray.Send(TrayCommand.Quit);
     }
@@ -473,19 +473,21 @@ internal static class Program
 
         Tick(2);
         tray.Send(TrayCommand.CaptureSettings);
-        var captureSettings = CaptureSettingsWindow.Current;
+        var captureSettings = CaptureSettingsPage.Current;
         timer.Fire();
         var checkpoint = store.LoadReminders();
         Check(captureSettings.Preferences is { GuideDismissed: false } &&
             CaptureShortcut.TryParse("Ctrl+Shift+7", out var chord) && captureSettings.Apply(chord) is null &&
             tray.CaptureBinding.Active == chord && captureSettings.DismissGuide(), "capture settings apply a shortcut and persist guidance dismissal");
         Check(store.LoadReminders() == checkpoint, "shortcut and guidance writes leave the reminder checkpoint unchanged");
-        tray.Send(TrayCommand.Capture, captureSettings.Handle);
-        Check(CaptureWindow.Current.Save("Capture with settings open") && SurfaceWindow.Returned == captureSettings.Handle && captureSettings.IsVisible,
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
+        Check(CaptureWindow.Current.Save("Capture with settings open") && SurfaceWindow.Returned == MainWindow.Current.Handle && MainWindow.Current.IsVisible,
             "capture returns to capture settings without replacing its draft");
+        captureSettings.IsDirty = true;
+        timer.Fire();
         Tick(20);
-        Check(WarningWindow.Shows == initialWarnings, "capture settings defer scheduled display without completing work");
-        captureSettings.Hide();
+        Check(WarningWindow.Shows == initialWarnings, "a dirty capture page defers scheduled display without completing work");
+        MainWindow.Current.Hide();
         timer.Fire();
         Tick(3);
         Check(WarningWindow.Current.IsVisible, "closing capture settings resumes the original work interval");
@@ -495,9 +497,9 @@ internal static class Program
 
         tray.Send(TrayCommand.CaptureSettings);
         Tick(20);
-        Check(!BreakWindow.Current.IsVisible && captureSettings.IsVisible &&
+        Check(!BreakWindow.Current.IsVisible && MainWindow.Current.IsVisible &&
             captureSettings.Preferences is { GuideDismissed: true }, "opening capture settings defers the partial break and retains acknowledged guidance");
-        captureSettings.Hide();
+        MainWindow.Current.Hide();
         timer.Fire();
         Check(WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10, "resuming the partial break gives a full warning");
         Tick(10);
@@ -506,7 +508,7 @@ internal static class Program
         Check(store.LoadReminders().Checkpoint?.CompletedShorts == 1, "the resumed break counts only after completing");
 
         tray.Send(TrayCommand.Quit);
-        Check(captureSettings.Closed && tray.CaptureBinding.Active is null, "quit closes capture settings and releases the active shortcut");
+        Check(MainWindow.Current.Closed && tray.CaptureBinding.Active is null, "quit closes capture settings and releases the active shortcut");
         _ = new AfterbreakSession(new DispatcherQueue(), () => { }, new TaskStore(path), clock);
         Check(Desktop.Current.CaptureBinding.Active?.ToString() == "Ctrl+Shift+7", "startup re-registers the persisted shortcut");
         Desktop.Current.Send(TrayCommand.Quit);
@@ -536,30 +538,31 @@ internal static class Program
         Tick(18);
         Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 7, "scheduled break is partly over before Appearance opens");
         tray.Send(TrayCommand.Appearance);
-        var window = AppearanceSettingsWindow.Current;
+        var window = AppearanceSettingsPage.Current;
+        window.IsDirty = true;
         Tick(20);
-        Check(window.IsVisible && !BreakWindow.Current.IsVisible && appearance.Preferences == AppearancePreferences.Default,
+        Check(MainWindow.Current.IsVisible && !BreakWindow.Current.IsVisible && appearance.Preferences == AppearancePreferences.Default,
             "Appearance defers scheduled display without replacing applied settings");
         var selected = new AppearancePreferences(AppearanceTheme.Light, BreakScene.Daylight);
         using (var blocker = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
         {
             blocker.Open();
             using var locked = blocker.BeginTransaction();
-            Check(!window.Save(selected) && appearance.Preferences == AppearancePreferences.Default && window.IsVisible,
+            Check(!window.Save(selected) && appearance.Preferences == AppearancePreferences.Default && MainWindow.Current.IsVisible,
                 "a failed appearance write leaves the current appearance applied and the form available");
             locked.Rollback();
         }
         var beforeSave = store.LoadReminders();
         Check(window.Save(selected) && appearance.Preferences == selected && new TaskStore(path).LoadAppearance() == selected &&
             store.LoadReminders() == beforeSave, "successful appearance save applies the preference and leaves the reminder checkpoint intact");
-        tray.Send(TrayCommand.Capture, window.Handle);
+        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
         CaptureWindow.Current.Input = "Keep the draft";
         tray.Send(TrayCommand.Appearance);
         Check(CaptureWindow.Current.Input == "Keep the draft" && CaptureWindow.Current.IsVisible,
             "opening Appearance while capturing leaves the capture draft intact");
         CaptureWindow.Current.Cancel();
-        Check(SurfaceWindow.Returned == window.Handle, "capture returns to Appearance");
-        window.Hide();
+        Check(SurfaceWindow.Returned == MainWindow.Current.Handle, "capture returns to Appearance");
+        MainWindow.Current.Hide();
         timer.Fire();
         Check(WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10, "Appearance resumes a partial break with a fresh warning");
         Tick(10);
@@ -567,6 +570,62 @@ internal static class Program
         Tick(7);
         Check(store.LoadReminders().Checkpoint?.CompletedShorts == 1, "the resumed break advances cadence only on completion");
         tray.Send(TrayCommand.Quit);
-        Check(appearance.Disposed && window.Closed, "Quit disposes appearance tracking and closes its window");
+        Check(appearance.Disposed && MainWindow.Current.Closed, "Quit disposes appearance tracking and closes its window");
+    }
+
+    private static void CheckMainNavigation(string path)
+    {
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5 };
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var queue = new DispatcherQueue();
+        _ = new AfterbreakSession(queue, () => { }, store, clock);
+        var tray = Desktop.Current;
+        var timer = queue.Timers[1];
+
+        void Tick(int seconds)
+        {
+            for (var second = 0; second < seconds; second++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                timer.Fire();
+            }
+        }
+
+        tray.Send(TrayCommand.OpenMain);
+        var host = MainWindow.Current;
+        Tick(2);
+        tray.Send(TrayCommand.Settings);
+        Check(ReferenceEquals(MainWindow.Current, host) && tray.MainHandle == host.Handle &&
+            host.CurrentPage == ManagementPage.Breaks && !host.DefersReminders,
+            "Open Afterbreak and the Settings deep link use one host and a clean page does not defer");
+        var draft = settings with { WorkSeconds = 42 };
+        host.Breaks.Draft = draft;
+        Tick(12);
+        Check(host.DefersReminders && !WarningWindow.Current.IsVisible && store.LoadReminders().Settings == settings,
+            "an active dirty settings page defers reminders without saving its draft");
+        host.Navigate(ManagementPage.Tasks);
+        Tick(4);
+        Check(WarningWindow.Current.IsVisible && host.Breaks.Draft == draft && !host.DefersReminders,
+            "visiting Tasks resumes the scheduler and retains the hidden settings draft");
+        tray.Send(TrayCommand.EndBreak);
+
+        tray.Send(TrayCommand.Settings);
+        host.Hide();
+        Check(!host.DefersReminders, "closing the main window hides the dirty page and releases the scheduler");
+        tray.Send(TrayCommand.OpenMain);
+        Check(ReferenceEquals(MainWindow.Current, host) && host.CurrentPage == ManagementPage.Breaks &&
+            host.Breaks.Draft == draft && host.Breaks.Save(draft) && host.IsVisible && !host.DefersReminders,
+            "reopening and saving restores the same section and leaves the main window open");
+
+        host.Navigate(ManagementPage.Tasks);
+        tray.Send(TrayCommand.Capture, host.Handle);
+        host.Navigate(ManagementPage.Appearance);
+        host.Foreground = true;
+        tray.Send(TrayCommand.Capture, host.Handle);
+        Check(CaptureWindow.Current.Save("Capture after navigation") && host.RestoredFocus?.Page == ManagementPage.Appearance &&
+            SurfaceWindow.Returned == host.Handle, "explicit same-window capture reentry takes the new page bookmark");
+        tray.Send(TrayCommand.Quit);
     }
 }

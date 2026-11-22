@@ -4,18 +4,17 @@ using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
 
-internal sealed class AppearanceSettingsWindow : Window
+internal sealed class AppearanceSettingsPage : UserControl
 {
     private readonly ComboBox theme = new() { Header = "App theme", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox scene = new() { Header = "Break scenery", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button saveButton = new() { Content = "Save appearance", HorizontalAlignment = HorizontalAlignment.Right };
-    private bool placed;
-    private bool quitting;
+    private AppearancePreferences saved = AppearancePreferences.Default;
+    private bool loadFailed;
 
-    internal AppearanceSettingsWindow(Func<AppearancePreferences, bool> save)
+    internal AppearanceSettingsPage(Func<AppearancePreferences, bool> save)
     {
-        Title = "Afterbreak · Appearance";
         var title = SurfaceStyle.Label("Appearance", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         foreach (var label in Enum.GetNames<AppearanceTheme>())
@@ -34,10 +33,10 @@ internal sealed class AppearanceSettingsWindow : Window
         }
         saveButton.Click += (_, _) =>
         {
-            var selected = new AppearancePreferences((AppearanceTheme)theme.SelectedIndex, (BreakScene)scene.SelectedIndex);
+            var selected = Draft;
             if (selected.IsValid && save(selected))
             {
-                AppWindow.Hide();
+                SetPreferences(selected);
             }
             else
             {
@@ -45,6 +44,8 @@ internal sealed class AppearanceSettingsWindow : Window
                 error.IsOpen = true;
             }
         };
+        var discard = new Button { Content = "Discard changes", HorizontalAlignment = HorizontalAlignment.Right };
+        discard.Click += (_, _) => SetPreferences(saved, loadFailed);
 
         var form = new StackPanel { Spacing = 14, Margin = new Thickness(20) };
         form.Children.Add(title);
@@ -53,49 +54,25 @@ internal sealed class AppearanceSettingsWindow : Window
         form.Children.Add(note);
         form.Children.Add(error);
         form.Children.Add(saveButton);
+        form.Children.Add(discard);
         Content = SurfaceStyle.Scroll(form);
-        AppWindow.Closing += (_, args) =>
-        {
-            if (!quitting)
-            {
-                args.Cancel = true;
-                AppWindow.Hide();
-            }
-        };
     }
 
-    internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+    private AppearancePreferences Draft => new((AppearanceTheme)theme.SelectedIndex, (BreakScene)scene.SelectedIndex);
+    internal bool IsDirty => Draft != saved;
+    internal bool HasFocusedEditor => theme.IsDropDownOpen || scene.IsDropDownOpen;
 
     internal void SetPreferences(AppearancePreferences preferences, bool loadFailed = false)
     {
+        saved = preferences;
+        this.loadFailed = loadFailed;
         theme.SelectedIndex = (int)preferences.Theme;
         scene.SelectedIndex = (int)preferences.Scene;
-        error.Message = "Couldn’t load the saved appearance. Reopen this window to retry.";
+        error.Message = "Couldn’t load the saved appearance. Return to Appearance to retry.";
         error.IsOpen = loadFailed;
         saveButton.IsEnabled = !loadFailed;
+        theme.IsEnabled = !loadFailed;
+        scene.IsEnabled = !loadFailed;
     }
 
-    internal void Show(nint source, AppearancePreferences preferences, bool loadFailed)
-    {
-        if (!AppWindow.IsVisible)
-        {
-            SetPreferences(preferences, loadFailed);
-        }
-        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 460, 450, placed))
-        {
-            return;
-        }
-        placed = true;
-        Activate();
-        if (!AppWindow.IsVisible)
-        {
-            AppWindow.Show();
-        }
-    }
-
-    internal void CloseForQuit()
-    {
-        quitting = true;
-        Close();
-    }
 }

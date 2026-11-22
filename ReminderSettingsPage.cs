@@ -1,10 +1,12 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
 
-internal sealed class SettingsWindow : Window
+internal sealed class ReminderSettingsPage : UserControl
 {
     private readonly ToggleSwitch enabled = new() { Header = "Scheduled reminders" };
     private readonly ToggleSwitch hours = new() { Header = "Limit reminders to working hours" };
@@ -18,16 +20,14 @@ internal sealed class SettingsWindow : Window
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = false };
     private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", 14);
     private readonly Func<ReminderSettings, bool> save;
-    private bool placed;
-    private bool quitting;
+    private ReminderSettings saved = ReminderSettings.Default;
+    private bool loadError;
     private double textScale = 1;
 
-    internal SettingsWindow(Func<ReminderSettings, bool> save)
+    internal ReminderSettingsPage(Func<ReminderSettings, bool> save)
     {
         this.save = save;
-        Title = "Afterbreak · Reminder settings";
-
-        var title = SurfaceStyle.Label("Reminder settings", 27, FontWeights.SemiBold);
+        var title = SurfaceStyle.Label("Breaks", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         var cadence = SurfaceStyle.SecondaryLabel("A long break follows three completed short breaks.", 13);
         cadence.TextWrapping = TextWrapping.Wrap;
@@ -50,6 +50,8 @@ internal sealed class SettingsWindow : Window
             saveButton.Style = style;
         }
         saveButton.Click += (_, _) => Save();
+        var discard = new Button { Content = "Discard changes", HorizontalAlignment = HorizontalAlignment.Right };
+        discard.Click += (_, _) => SetForm(saved, loadError);
 
         var form = new StackPanel { Spacing = 14, Margin = new Thickness(20) };
         form.Children.Add(title);
@@ -65,15 +67,8 @@ internal sealed class SettingsWindow : Window
         form.Children.Add(privacy);
         form.Children.Add(error);
         form.Children.Add(saveButton);
+        form.Children.Add(discard);
         Content = SurfaceStyle.Scroll(form);
-        AppWindow.Closing += (_, args) =>
-        {
-            if (!quitting)
-            {
-                args.Cancel = true;
-                AppWindow.Hide();
-            }
-        };
     }
 
     internal static ComboBox CreateBreakDisplaySelector()
@@ -85,7 +80,25 @@ internal sealed class SettingsWindow : Window
         return selector;
     }
 
-    internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+    internal bool IsDirty => ReadDraft() != saved;
+    internal bool HasFocusedEditor => breakDisplay.IsDropDownOpen || HasTimingEditorFocus();
+
+    private bool HasTimingEditorFocus()
+    {
+        if (XamlRoot is not { } xamlRoot)
+        {
+            return false;
+        }
+        var focused = FocusManager.GetFocusedElement(xamlRoot) as DependencyObject;
+        for (var element = focused; element is not null && element != this; element = VisualTreeHelper.GetParent(element))
+        {
+            if (element is NumberBox or TimePicker)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     internal void ApplyAppearance(AppearanceState state)
     {
@@ -106,28 +119,10 @@ internal sealed class SettingsWindow : Window
         Grid.SetRow(end, stack ? 1 : 0);
     }
 
-    internal void Show(nint source, ReminderSettings settings, string description, bool storageError)
-    {
-        if (!AppWindow.IsVisible)
-        {
-            SetForm(settings, storageError);
-        }
-
-        SetStatus(description);
-        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 530, 720, placed))
-        {
-            return;
-        }
-        placed = true;
-        Activate();
-        if (!AppWindow.IsVisible)
-        {
-            AppWindow.Show();
-        }
-    }
-
     internal void SetForm(ReminderSettings settings, bool storageError)
     {
+        saved = settings;
+        loadError = storageError;
         enabled.IsOn = settings.Enabled;
         hours.IsOn = settings.WorkingHours;
         start.Time = TimeSpan.FromMinutes(settings.StartMinute);
@@ -137,8 +132,17 @@ internal sealed class SettingsWindow : Window
         shortBreak.Value = settings.ShortSeconds;
         longBreak.Value = settings.LongSeconds;
         breakDisplay.SelectedIndex = (int)settings.BreakDisplay;
-        error.Message = "Reminder settings are unavailable. Reopen this window to retry loading your settings.";
+        error.Message = "Reminder settings are unavailable. Return to Breaks to retry loading your settings.";
         error.IsOpen = storageError;
+    }
+
+    internal void RebaseBreakDisplay(BreakDisplay display)
+    {
+        if (breakDisplay.SelectedIndex == (int)saved.BreakDisplay)
+        {
+            breakDisplay.SelectedIndex = (int)display;
+        }
+        saved = saved with { BreakDisplay = display };
     }
 
     internal void SetStatus(string description)
@@ -147,12 +151,6 @@ internal sealed class SettingsWindow : Window
         {
             status.Text = description;
         }
-    }
-
-    internal void CloseForQuit()
-    {
-        quitting = true;
-        Close();
     }
 
     private void Save()
@@ -170,9 +168,8 @@ internal sealed class SettingsWindow : Window
             return;
         }
 
-        var settings = new ReminderSettings(enabled.IsOn, (int)work.Value, (int)shortBreak.Value, (int)longBreak.Value,
-            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, display);
-        if (!settings.IsValid)
+        var settings = ReadDraft();
+        if (settings is null || !settings.IsValid)
         {
             Report("Check the durations and choose different start and end times for working hours.");
         }
@@ -182,8 +179,20 @@ internal sealed class SettingsWindow : Window
         }
         else
         {
-            AppWindow.Hide();
+            saved = settings;
+            loadError = false;
+            error.IsOpen = false;
         }
+    }
+
+    private ReminderSettings? ReadDraft()
+    {
+        if (!Whole(work.Value) || !Whole(shortBreak.Value) || !Whole(longBreak.Value))
+        {
+            return null;
+        }
+        return new ReminderSettings(enabled.IsOn, (int)work.Value, (int)shortBreak.Value, (int)longBreak.Value,
+            hours.IsOn, (int)start.Time.TotalMinutes, (int)end.Time.TotalMinutes, (BreakDisplay)breakDisplay.SelectedIndex);
     }
 
     private void Report(string message)

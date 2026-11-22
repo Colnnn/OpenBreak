@@ -15,7 +15,6 @@ internal sealed partial class AfterbreakSession
     private DispatcherQueueTimer reminderTimer = null!;
     private ReminderScheduler reminders = null!;
     private TimeProvider reminderClock = null!;
-    private SettingsWindow? reminderSettings;
     private bool reminderStorageError;
     private bool reminderLoadError;
     private bool scheduledSurface;
@@ -74,8 +73,7 @@ internal sealed partial class AfterbreakSession
 
     private bool IsEditingOrPreviewing() => visible == Surface.Capture ||
         (!scheduledSurface && visible is (Surface.Warning or Surface.Preview)) ||
-        (desktop.MenuOpen && visible != Surface.Preview) || reminderSettings?.AppWindow.IsVisible == true ||
-        captureSettings?.AppWindow.IsVisible == true || appearanceSettings?.AppWindow.IsVisible == true || board?.IsEditing == true;
+        (desktop.MenuOpen && visible != Surface.Preview) || main?.DefersReminders == true;
 
     private void UpdateScheduledReminders(bool recheckPresentation = false, string reason = "reminder-tick")
     {
@@ -293,6 +291,7 @@ internal sealed partial class AfterbreakSession
         }
 
         reminders = candidate;
+        main?.Capture.RebaseBreakDisplay(settings.BreakDisplay);
         reminderLoadError = false;
         UpdateReminderTimer();
         UpdateScheduledReminders();
@@ -365,7 +364,7 @@ internal sealed partial class AfterbreakSession
             ((pauses | systemPause) & (ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.Presentation)) != 0 ? "Reminders on · Paused by Windows" :
             phase == ReminderPhase.Snoozed ? "Reminders on · Snoozed" :
             phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval";
-        reminderSettings?.SetStatus(desktop.ReminderStatus);
+        main?.Breaks.SetStatus(desktop.ReminderStatus);
         desktop.RefreshTrayFlyout();
     }
 }

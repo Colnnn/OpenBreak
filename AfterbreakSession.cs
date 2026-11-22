@@ -17,9 +17,7 @@ internal sealed partial class AfterbreakSession
     private readonly CaptureOptions captureOptions;
     private readonly WindowAppearance appearance;
     private readonly BreakDiagnostics? diagnostics;
-    private BoardWindow? board;
-    private CaptureSettingsWindow? captureSettings;
-    private AppearanceSettingsWindow? appearanceSettings;
+    private MainWindow? main;
     private AppearancePreferences appearancePreferences = AppearancePreferences.Default;
     private bool appearanceLoadFailed;
     private Surface visible;
@@ -28,7 +26,7 @@ internal sealed partial class AfterbreakSession
     private long diagnosticStartedAt;
     private TimeSpan diagnosticExpected;
     private nint returnWindow;
-    private BoardWindow.CardFocus? captureCardFocus;
+    private MainWindow.FocusBookmark? captureFocus;
 
     internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
         TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null)
@@ -65,11 +63,11 @@ internal sealed partial class AfterbreakSession
         Preview,
     }
 
-    private readonly record struct CaptureBookmark(BoardWindow.CardFocus? Card);
+    private readonly record struct CaptureBookmark(MainWindow.FocusBookmark? Focus);
 
     private Action<TrayCommand> BindTrayCommand(nint source)
     {
-        var bookmark = new CaptureBookmark(FocusedBoardCard(source));
+        var bookmark = new CaptureBookmark(FocusedMainPage(source));
         return command => Execute(command, source, bookmark);
     }
 
@@ -77,49 +75,17 @@ internal sealed partial class AfterbreakSession
     {
         switch (command)
         {
+            case TrayCommand.OpenMain:
+                OpenMain(source);
+                break;
             case TrayCommand.Appearance:
-                DismissBreakForSettings(preserveSchedule: true);
-                if (appearanceLoadFailed && appearanceSettings?.AppWindow.IsVisible != true)
-                {
-                    LoadAppearance();
-                    appearance.Apply(appearancePreferences);
-                }
-                if (appearanceSettings is null)
-                {
-                    appearanceSettings = new AppearanceSettingsWindow(SaveAppearance);
-                    appearance.Track(appearanceSettings, SurfaceMaterial.Mica);
-                }
-                desktop.AppearanceHandle = appearanceSettings.Handle;
-                appearanceSettings.Show(source, appearancePreferences, appearanceLoadFailed);
+                OpenMain(source, ManagementPage.Appearance);
                 break;
             case TrayCommand.CaptureSettings:
-                DismissBreakForSettings(preserveSchedule: true);
-                if (captureOptions.LoadFailed && captureSettings?.AppWindow.IsVisible != true)
-                {
-                    captureOptions.Load();
-                    desktop.RefreshShortcutTip();
-                }
-                if (captureSettings is null)
-                {
-                    captureSettings = new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide, SaveAndPreviewGuide);
-                    appearance.Track(captureSettings, SurfaceMaterial.Mica);
-                }
-                desktop.CaptureSettingsHandle = captureSettings.Handle;
-                captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status, reminders.Settings.BreakDisplay);
+                OpenMain(source, ManagementPage.Capture);
                 break;
             case TrayCommand.Settings:
-                DismissBreakForSettings(preserveSchedule: true);
-                if (reminderLoadError && reminderSettings?.AppWindow.IsVisible != true)
-                {
-                    TryLoadReminderSettings();
-                }
-                if (reminderSettings is null)
-                {
-                    reminderSettings = new SettingsWindow(SaveSettings);
-                    appearance.Track(reminderSettings, SurfaceMaterial.Mica);
-                }
-                desktop.SettingsHandle = reminderSettings.Handle;
-                reminderSettings.Show(source, reminders.Settings, desktop.ReminderStatus, reminderStorageError);
+                OpenMain(source, ManagementPage.Breaks);
                 break;
             case TrayCommand.TogglePause:
                 TogglePresentationPause();
@@ -131,34 +97,23 @@ internal sealed partial class AfterbreakSession
                 SkipReminder();
                 break;
             case TrayCommand.Tasks:
-                StopScheduledSurfaceForInput();
-                if (visible is Surface.Warning or Surface.Preview)
-                {
-                    Dismiss("open-tasks");
-                }
-
-                if (board is null)
-                {
-                    board = new BoardWindow(tasks, () => Execute(TrayCommand.Capture, desktop.BoardHandle));
-                    appearance.Track(board, SurfaceMaterial.Mica);
-                }
-                desktop.BoardHandle = board.Handle;
-                board.Show(source);
+                OpenMain(source, ManagementPage.Tasks);
                 break;
             case TrayCommand.Capture:
                 desktop.DismissTray();
                 if (visible == Surface.Capture)
                 {
                     var previousSource = returnWindow;
-                    var previousCardFocus = captureCardFocus;
-                    if (source != 0 && source != returnWindow)
+                    var previousFocus = captureFocus;
+                    if (source != 0 && (source != returnWindow || (main is { } host && source == host.Handle &&
+                        (host.HasForeground || (bookmark?.Focus is { } current && current.Page != captureFocus?.Page)))))
                     {
                         SetCaptureSource(source, bookmark);
                     }
                     if (!capture.BringBack(returnWindow))
                     {
                         returnWindow = previousSource;
-                        captureCardFocus = previousCardFocus;
+                        captureFocus = previousFocus;
                     }
                     return;
                 }
@@ -205,24 +160,65 @@ internal sealed partial class AfterbreakSession
                 capture.Close();
                 warning.Close();
                 preview.CloseForQuit();
-                board?.CloseForQuit();
-                reminderSettings?.CloseForQuit();
-                captureSettings?.CloseForQuit();
-                appearanceSettings?.CloseForQuit();
+                main?.CloseForQuit();
                 exit();
+                break;
+        }
+    }
+
+    private void OpenMain(nint source, ManagementPage? page = null)
+    {
+        // An explicit reveal can interrupt the display without losing scheduled break time.
+        DismissBreakForSettings();
+        if (main is null)
+        {
+            var tasksPage = new TasksPage(tasks, () => Execute(TrayCommand.Capture, desktop.MainHandle));
+            var breaksPage = new ReminderSettingsPage(SaveSettings);
+            var capturePage = new CaptureSettingsPage(ApplyCaptureShortcut, captureOptions.DismissGuide, SaveAndPreviewGuide);
+            var appearancePage = new AppearanceSettingsPage(SaveAppearance);
+            breaksPage.SetForm(reminders.Settings, reminderStorageError);
+            breaksPage.SetStatus(desktop.ReminderStatus);
+            capturePage.SetPreferences(captureOptions.Preferences, captureOptions.Status, reminders.Settings.BreakDisplay);
+            appearancePage.SetPreferences(appearancePreferences, appearanceLoadFailed);
+            main = new MainWindow(tasksPage, breaksPage, capturePage, appearancePage);
+            main.PageVisited += RefreshPageAfterLoadFailure;
+            desktop.MainHandle = main.Handle;
+            appearance.Track(main, SurfaceMaterial.Mica);
+        }
+        main.TryShow(source, page);
+    }
+
+    private void RefreshPageAfterLoadFailure(ManagementPage page)
+    {
+        if (main is null)
+        {
+            return;
+        }
+        switch (page)
+        {
+            case ManagementPage.Breaks when reminderLoadError && !main.Breaks.IsDirty:
+                TryLoadReminderSettings();
+                main.Breaks.SetForm(reminders.Settings, reminderStorageError);
+                main.Capture.RebaseBreakDisplay(reminders.Settings.BreakDisplay);
+                break;
+            case ManagementPage.Capture when captureOptions.LoadFailed && !main.Capture.IsDirty:
+                captureOptions.Load();
+                desktop.RefreshShortcutTip();
+                main.Capture.SetPreferences(captureOptions.Preferences, captureOptions.Status, reminders.Settings.BreakDisplay);
+                break;
+            case ManagementPage.Appearance when appearanceLoadFailed && !main.Appearance.IsDirty:
+                LoadAppearance();
+                appearance.Apply(appearancePreferences);
+                main.Appearance.SetPreferences(appearancePreferences, appearanceLoadFailed);
                 break;
         }
     }
 
     private string? SaveAndPreviewGuide(BreakDisplay display)
     {
-        if (captureSettings is not { GuideHasForeground: true } guide || visible != Surface.None)
+        if (main is not { GuideHasForeground: true } guide || visible != Surface.None)
         {
             return "Finish the current capture or preview before starting another preview.";
-        }
-        if (reminderSettings?.AppWindow.IsVisible == true)
-        {
-            return "Close Reminder settings before saving here.";
         }
         if (!Enum.IsDefined(display))
         {
@@ -230,13 +226,13 @@ internal sealed partial class AfterbreakSession
         }
         if (reminderLoadError)
         {
-            return "Saved reminder settings are unavailable. Retry in Reminder settings.";
+            return "Saved reminder settings are unavailable. Reopen Breaks to retry.";
         }
         if (!ManualPreviewAllowed(checkPresentation: true))
         {
             return "A preview is unavailable while breaks are paused or the display is unavailable.";
         }
-        var source = guide.PreviewSource;
+        var source = guide.GuidePreviewTarget;
         if (!warning.TryPrepare(source))
         {
             return "The preview warning couldn’t be positioned. Try again.";
@@ -252,6 +248,8 @@ internal sealed partial class AfterbreakSession
         }
 
         reminders = reminders.WithSettings(reminders.Settings with { BreakDisplay = display });
+        guide.Breaks.RebaseBreakDisplay(display);
+        guide.Capture.RebaseBreakDisplay(display);
         if (!ManualPreviewAllowed(checkPresentation: true) || !guide.GuideHasForeground ||
             !warning.PlacementIsCurrent)
         {
@@ -265,7 +263,7 @@ internal sealed partial class AfterbreakSession
             return "Break display saved. The warning couldn’t open. Try again.";
         }
         BeginManualPreview(source, sample: false);
-        guide.HideForPreview();
+        guide.HandOffGuidePreview(source);
         return null;
     }
 
@@ -312,16 +310,12 @@ internal sealed partial class AfterbreakSession
         return true;
     }
 
-    private void DismissBreakForSettings(bool preserveSchedule = false)
+    private void DismissBreakForSettings()
     {
-        if (preserveSchedule && scheduledSurface)
+        if (scheduledSurface)
         {
             reminders.Update(ReminderPause.Interaction);
             checkpointDirty = true;
-        }
-        else
-        {
-            StopScheduledSurfaceForInput();
         }
         if (visible is Surface.Warning or Surface.Preview)
         {
@@ -333,7 +327,7 @@ internal sealed partial class AfterbreakSession
     {
         var failure = captureOptions.Apply(shortcut);
         desktop.RefreshShortcutTip();
-        captureSettings?.SetStatus(captureOptions.Status);
+        main?.Capture.SetStatus(captureOptions.Status);
         return failure;
     }
 
@@ -368,13 +362,13 @@ internal sealed partial class AfterbreakSession
             $"event={kind} phase={visible} mode={mode} reason={reason ?? "none"} elapsedMs={elapsed.TotalMilliseconds:F0} expectedMs={diagnosticExpected.TotalMilliseconds:F0} foreground={preview.HasForeground} trayForeground={desktop.TrayFlyoutHasForeground} manualPause={reminders.ManuallyPaused} {desktop.LastBreakEligibility} {placement}"));
     }
 
-    private BoardWindow.CardFocus? FocusedBoardCard(nint source) =>
-        board is not null && source == board.Handle ? board.GetFocusedCard() : null;
+    private MainWindow.FocusBookmark? FocusedMainPage(nint source) =>
+        main is not null && source == main.Handle ? main.GetFocusBookmark() : null;
 
     private void SetCaptureSource(nint source, CaptureBookmark? bookmark)
     {
         returnWindow = source;
-        captureCardFocus = bookmark is { } captured ? captured.Card : FocusedBoardCard(source);
+        captureFocus = bookmark is { } captured ? captured.Focus : FocusedMainPage(source);
     }
 
     private void Tick(DispatcherQueueTimer sender, object args)
@@ -490,12 +484,9 @@ internal sealed partial class AfterbreakSession
             return false;
         }
 
-        var cardFocus = captureCardFocus;
+        var focus = captureFocus;
         Dismiss();
-        if (board?.AppWindow.IsVisible == true)
-        {
-            board.RefreshAfterCapture(cardFocus);
-        }
+        main?.NotifyTaskCaptured(focus);
         return true;
     }
 
@@ -522,7 +513,7 @@ internal sealed partial class AfterbreakSession
                 break;
         }
         returnWindow = 0;
-        captureCardFocus = null;
+        captureFocus = null;
         desktop.RefreshTrayFlyout();
     }
 }

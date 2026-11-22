@@ -15,6 +15,7 @@ internal enum TrayCommand
     CaptureSettings,
     Appearance,
     OpenMain,
+    ToggleFloatingTimer,
 }
 
 internal readonly record struct TrayMenuItem(TrayCommand Command, string Label, bool Visible = true, bool Enabled = true)
@@ -24,7 +25,8 @@ internal readonly record struct TrayMenuItem(TrayCommand Command, string Label, 
 
 internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview, string? DismissLabel,
     string ReminderStatus, bool ManuallyPaused, bool SnoozeAvailable, bool SkipAvailable,
-    int SnoozeSeconds = ReminderSettings.DefaultSnoozeSeconds)
+    int SnoozeSeconds = ReminderSettings.DefaultSnoozeSeconds, string? CountdownStatus = null,
+    bool? FloatingTimerHidden = null)
 {
     internal TrayMenuItem[] Items() =>
     [
@@ -34,6 +36,8 @@ internal readonly record struct TrayMenuState(string? Shortcut, bool CanPreview,
         new(TrayCommand.PreviewSampleBoard, "Preview sample board", Enabled: CanPreview),
         new(TrayCommand.EndBreak, DismissLabel ?? "", Visible: DismissLabel is not null),
         new(TrayCommand.Settings, "Settings"),
+        new(TrayCommand.ToggleFloatingTimer, FloatingTimerHidden == true ? "Show floating timer" : "Hide floating timer",
+            Visible: FloatingTimerHidden.HasValue),
         new(TrayCommand.TogglePause, ManuallyPaused ? "Resume after presentation" : "Pause for presentation"),
         new(TrayCommand.Snooze, $"Snooze {ReminderDuration.Format(SnoozeSeconds)}", Visible: SnoozeAvailable),
         new(TrayCommand.Skip, "Skip break", Visible: SkipAvailable),

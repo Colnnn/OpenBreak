@@ -12,6 +12,9 @@ internal sealed class AppearanceSettingsPage : UserControl
     private readonly ComboBox scene = new() { Header = "Break scenery", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox motion = new() { Header = "Break scene motion", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ToggleSwitch sound = new();
+    private readonly ToggleSwitch trayCountdown = new();
+    private readonly ToggleSwitch floatingTimer = new();
+    private readonly ToggleSwitch floatingOnTop = new();
     private readonly ScenePreview preview = new();
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button saveButton = new() { Content = "Save appearance", HorizontalAlignment = HorizontalAlignment.Right };
@@ -39,9 +42,11 @@ internal sealed class AppearanceSettingsPage : UserControl
         motion.Items.Add("Follow Windows");
         motion.Items.Add("Off");
         scene.SelectionChanged += (_, _) => UpdatePreview();
-        const string soundLabel = "Play a sound when a break starts";
-        sound.Header = new TextBlock { Text = soundLabel, TextWrapping = TextWrapping.Wrap };
-        AutomationProperties.SetName(sound, soundLabel);
+        LabelToggle(sound, "Play a sound when a break starts");
+        LabelToggle(trayCountdown, "Show countdown in the system tray");
+        LabelToggle(floatingTimer, "Show a floating desktop timer");
+        LabelToggle(floatingOnTop, "Keep the floating timer on top");
+        floatingTimer.Toggled += (_, _) => floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
 
         var sampleTitle = SurfaceStyle.Label("Scene preview", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
         sampleTitle.TextWrapping = TextWrapping.Wrap;
@@ -79,6 +84,13 @@ internal sealed class AppearanceSettingsPage : UserControl
         form.Children.Add(motion);
         form.Children.Add(sound);
         form.Children.Add(Note("Plays a short chime for scheduled breaks and break previews when enabled."));
+        var countdown = SurfaceStyle.Label("Countdown visibility", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
+        countdown.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(countdown, AutomationHeadingLevel.Level2);
+        form.Children.Add(countdown);
+        form.Children.Add(trayCountdown);
+        form.Children.Add(floatingTimer);
+        form.Children.Add(floatingOnTop);
         actions.Children.Add(saveButton);
         actions.Children.Add(discard);
         footer.Children.Add(error);
@@ -96,7 +108,7 @@ internal sealed class AppearanceSettingsPage : UserControl
     }
 
     private AppearancePreferences Draft => new((AppearanceTheme)theme.SelectedIndex, (BreakScene)scene.SelectedIndex,
-        (SceneMotion)motion.SelectedIndex, sound.IsOn);
+        (SceneMotion)motion.SelectedIndex, sound.IsOn, trayCountdown.IsOn, floatingTimer.IsOn, floatingOnTop.IsOn);
     internal bool IsDirty => Draft != saved;
     internal bool HasFocusedEditor => theme.IsDropDownOpen || scene.IsDropDownOpen || motion.IsDropDownOpen;
 
@@ -125,6 +137,9 @@ internal sealed class AppearanceSettingsPage : UserControl
         scene.SelectedIndex = (int)preferences.Scene;
         motion.SelectedIndex = (int)preferences.Motion;
         sound.IsOn = preferences.BreakStartSound;
+        trayCountdown.IsOn = preferences.TrayCountdown;
+        floatingTimer.IsOn = preferences.FloatingTimer;
+        floatingOnTop.IsOn = preferences.FloatingTimerOnTop;
         error.Message = "Couldn’t load the saved appearance. Return to Appearance to retry.";
         error.IsOpen = loadFailed;
         saveButton.IsEnabled = !loadFailed;
@@ -132,6 +147,15 @@ internal sealed class AppearanceSettingsPage : UserControl
         scene.IsEnabled = !loadFailed;
         motion.IsEnabled = !loadFailed;
         sound.IsEnabled = !loadFailed;
+        trayCountdown.IsEnabled = !loadFailed;
+        floatingTimer.IsEnabled = !loadFailed;
+        floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
+    }
+
+    private static void LabelToggle(ToggleSwitch toggle, string label)
+    {
+        toggle.Header = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
+        AutomationProperties.SetName(toggle, label);
     }
 
     private static TextBlock Note(string text)

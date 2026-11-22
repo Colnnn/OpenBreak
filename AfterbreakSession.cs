@@ -19,8 +19,11 @@ internal sealed partial class AfterbreakSession
     private readonly BreakDiagnostics? diagnostics;
     private readonly Action? playBreakCue;
     private MainWindow? main;
+    private FloatingTimerWindow? floatingTimer;
     private AppearancePreferences appearancePreferences = AppearancePreferences.Default;
     private bool appearanceLoadFailed;
+    private bool floatingTimerHidden;
+    private bool quitting;
     private Surface visible;
     private bool samplePreview;
     private long startedAt;
@@ -93,6 +96,9 @@ internal sealed partial class AfterbreakSession
             case TrayCommand.TogglePause:
                 TogglePresentationPause();
                 break;
+            case TrayCommand.ToggleFloatingTimer:
+                SetFloatingTimerHidden(!floatingTimerHidden);
+                break;
             case TrayCommand.Snooze:
                 SnoozeReminder();
                 break;
@@ -121,8 +127,9 @@ internal sealed partial class AfterbreakSession
                     return;
                 }
 
+                floatingTimer?.Hide();
                 StopScheduledSurfaceForInput();
-                Dismiss("capture-command");
+                Dismiss("capture-command", includeFloating: false);
                 SetCaptureSource(source, bookmark);
                 if (!capture.TryShow(source))
                 {
@@ -142,6 +149,8 @@ internal sealed partial class AfterbreakSession
                 EndVisibleBreak();
                 break;
             case TrayCommand.Quit:
+                quitting = true;
+                floatingTimer?.CloseForQuit();
                 reminderTimer.Stop();
                 if (reminders.Settings.Enabled && !reminderStorageError)
                 {
@@ -218,6 +227,7 @@ internal sealed partial class AfterbreakSession
                 LoadAppearance();
                 appearance.Apply(appearancePreferences);
                 main.Appearance.SetPreferences(appearancePreferences, appearanceLoadFailed);
+                ApplyCountdownPreferences();
                 break;
         }
         UpdateReminderTimer();
@@ -332,9 +342,95 @@ internal sealed partial class AfterbreakSession
         {
             return false;
         }
+        if (appearancePreferences.FloatingTimer != preferences.FloatingTimer)
+        {
+            floatingTimerHidden = false;
+        }
         appearancePreferences = preferences;
         appearance.Apply(preferences);
+        ApplyCountdownPreferences();
         return true;
+    }
+
+    private bool WantsFloatingTimer => !quitting && appearancePreferences.FloatingTimer && !floatingTimerHidden;
+
+    private void ApplyCountdownPreferences()
+    {
+        if (!WantsFloatingTimer)
+        {
+            floatingTimer?.Hide();
+        }
+        if (!appearancePreferences.TrayCountdown)
+        {
+            desktop.SetCountdown(null, appearance.State);
+        }
+        desktop.FloatingTimerHidden = appearancePreferences.FloatingTimer ? floatingTimerHidden : null;
+        PublishFocusSnapshot();
+        desktop.RefreshTrayFlyout();
+        UpdateReminderTimer();
+    }
+
+    private void SetFloatingTimerHidden(bool hidden)
+    {
+        if (appearancePreferences.FloatingTimer)
+        {
+            floatingTimerHidden = hidden;
+            desktop.FloatingTimerHidden = hidden;
+            PublishFocusSnapshot();
+            desktop.RefreshTrayFlyout();
+            UpdateReminderTimer();
+        }
+    }
+
+    private void PublishCountdownDisplays(FocusSnapshot snapshot, bool includeFloating)
+    {
+        if (quitting)
+        {
+            return;
+        }
+        var display = CountdownDisplay.From(snapshot);
+        if (appearancePreferences.TrayCountdown)
+        {
+            desktop.SetCountdown(display, appearance.State);
+        }
+        if (!includeFloating || !WantsFloatingTimer ||
+            !CountdownDisplay.MayFloat(snapshot, visible is Surface.Capture or Surface.Preview))
+        {
+            floatingTimer?.Hide();
+            return;
+        }
+        if (floatingTimer is null)
+        {
+            FloatingTimerPosition? position = null;
+            try
+            {
+                position = tasks.LoadFloatingTimerPosition();
+            }
+            catch (Exception exception) when (TaskStore.IsStorageError(exception))
+            {
+                // The default work-area corner remains usable if placement cannot be read.
+            }
+            floatingTimer = new FloatingTimerWindow(() => SetFloatingTimerHidden(true), SaveFloatingTimerPosition, position);
+            desktop.FloatingTimerHandle = floatingTimer.Handle;
+            appearance.Track(floatingTimer, SurfaceMaterial.FloatingTimer);
+        }
+        // Eligibility can change while reading the saved position and constructing the surface.
+        if (floatingTimer.AppWindow.IsVisible || desktop.GetSystemPause(checkPresentation: true) == ReminderPause.None)
+        {
+            floatingTimer.Present(display, appearancePreferences.FloatingTimerOnTop);
+        }
+    }
+
+    private void SaveFloatingTimerPosition(FloatingTimerPosition position)
+    {
+        try
+        {
+            tasks.SaveFloatingTimerPosition(position);
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            // Keep the session position. The last valid saved placement remains on disk.
+        }
     }
 
     private void PlayBreakStartCue()
@@ -424,6 +520,10 @@ internal sealed partial class AfterbreakSession
         }
         if (desktop.MenuOpen)
         {
+            if (appearancePreferences.TrayCountdown)
+            {
+                PublishFocusSnapshot();
+            }
             return;
         }
 
@@ -454,6 +554,7 @@ internal sealed partial class AfterbreakSession
                 return;
             }
             var source = desktop.WorkWindow();
+            floatingTimer?.Hide();
             if (!preview.TryShow(source))
             {
                 diagnostics?.Write($"event=not-shown phase=Preview mode=manual reason=prepare-break {preview.DescribePlacement()}");
@@ -534,7 +635,7 @@ internal sealed partial class AfterbreakSession
         return true;
     }
 
-    private void Dismiss([CallerMemberName] string reason = "")
+    private void Dismiss([CallerMemberName] string reason = "", bool includeFloating = true)
     {
         TraceBreak("dismiss", reason);
         var closing = visible;
@@ -558,7 +659,7 @@ internal sealed partial class AfterbreakSession
         }
         returnWindow = 0;
         captureFocus = null;
-        PublishFocusSnapshot();
+        PublishFocusSnapshot(includeFloating);
         desktop.RefreshTrayFlyout();
     }
 }

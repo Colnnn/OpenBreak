@@ -64,6 +64,16 @@ internal static class MonitorPlacement
         return new PixelRect(x, y, width, height);
     }
 
+    internal static PixelRect PositionWithin(PixelRect area, PixelRect fitted, int horizontal, int vertical, int extent) =>
+        fitted with
+        {
+            X = area.X + (int)Math.Round((area.Width - fitted.Width) * ((double)horizontal / extent)),
+            Y = area.Y + (int)Math.Round((area.Height - fitted.Height) * ((double)vertical / extent)),
+        };
+
+    internal static int RelativeOffset(int coordinate, int edge, int travel, int extent) =>
+        travel <= 0 ? 0 : (int)Math.Round(Math.Clamp(((double)coordinate - edge) / travel, 0, 1) * extent);
+
     internal static PixelRect? Caption(PixelRect window, double scale)
     {
         if (!window.IsValid || !double.IsFinite(scale) || scale <= 0)

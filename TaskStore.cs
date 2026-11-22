@@ -16,7 +16,7 @@ internal sealed partial class TaskStore(string path)
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 8;
+    private const int SchemaVersion = 9;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -220,6 +220,7 @@ internal sealed partial class TaskStore(string path)
             {ReminderTable}
             {CaptureTable}
             {AppearanceTable}
+            {FloatingTimerPlacementTable}
             PRAGMA application_id = {ApplicationId};
             PRAGMA user_version = {SchemaVersion};
             """);
@@ -261,13 +262,13 @@ internal sealed partial class TaskStore(string path)
                 }
                 if (version >= 4)
                 {
-                    MigrateAppearance(connection, transaction);
+                    MigrateAppearance(connection, transaction, version);
                 }
                 if (version is >= 2 and < 7)
                 {
                     MigrateReminderSettings(connection, transaction, version);
                 }
-                else if (version == 7)
+                else if (version >= 7)
                 {
                     ReadReminders(connection, transaction);
                 }
@@ -275,6 +276,7 @@ internal sealed partial class TaskStore(string path)
                     {(version == 1 ? ReminderTable : "")}
                     {(version <= 2 ? CaptureTable : "")}
                     {(version <= 3 ? AppearanceTable : "")}
+                    {FloatingTimerPlacementTable}
                     PRAGMA user_version = {SchemaVersion};
                     """);
                 migration.ExecuteNonQuery();

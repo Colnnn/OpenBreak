@@ -39,6 +39,8 @@ internal sealed class WindowAppearance : IDisposable
         apply(current);
     }
 
+    internal AppearanceState State => current;
+
     internal void Apply(AppearancePreferences settings)
     {
         preferences = settings;
@@ -63,7 +65,7 @@ internal sealed class WindowAppearance : IDisposable
             return ((BreakWindow)window).ApplyAppearance;
         }
 
-        var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray;
+        var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray or SurfaceMaterial.FloatingTimer;
         var panel = frame ? (Border)window.Content : new Border
         {
             Style = (Style)Application.Current.Resources["AfterbreakOpaqueBackdropStyle"],
@@ -122,6 +124,9 @@ internal sealed class WindowAppearance : IDisposable
                     break;
                 case TrayFlyoutWindow tray:
                     tray.ApplyAppearance(state);
+                    break;
+                case FloatingTimerWindow floating:
+                    floating.ApplyAppearance(state);
                     break;
                 case MainWindow main:
                     main.ApplyAppearance(state, panel.RequestedTheme);

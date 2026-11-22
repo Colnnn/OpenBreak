@@ -99,7 +99,7 @@ internal sealed class FocusPage : UserControl
         {
             return;
         }
-        SetText(timer, Duration(snapshot.PreviewPhase.HasValue ? snapshot.PreviewSeconds : snapshot.Seconds));
+        SetText(timer, FocusSnapshot.FormatTime(snapshot.PreviewPhase.HasValue ? snapshot.PreviewSeconds : snapshot.Seconds));
         if (current is { } previous && previous with { Seconds = snapshot.Seconds, PreviewSeconds = snapshot.PreviewSeconds } == snapshot)
         {
             current = snapshot;
@@ -221,10 +221,6 @@ internal sealed class FocusPage : UserControl
             label.Text = text;
         }
     }
-
-    private static string Duration(int seconds) => seconds >= 3600
-        ? $"{seconds / 3600}:{seconds / 60 % 60:00}:{seconds % 60:00}"
-        : $"{seconds / 60:00}:{seconds % 60:00}";
 
     private static string PauseDescription(ReminderPause pauses, bool previewing)
     {

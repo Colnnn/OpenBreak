@@ -46,6 +46,9 @@ namespace Afterbreak
         public bool Disposed { get; private set; }
         public string? DismissLabel { get; set; }
         public nint MainHandle { get; set; }
+        public nint FloatingTimerHandle { get; set; }
+        public bool? FloatingTimerHidden { get; set; }
+        public CountdownDisplay? Countdown { get; private set; }
         public CaptureBinding CaptureBinding { get; } = new((_, _) => true, _ => true);
         public bool PreviewAvailable { get; set; } = true;
         public bool MenuOpen { get; set; }
@@ -92,6 +95,7 @@ namespace Afterbreak
         public void ChangeEligibility(string reason = "session-change") => EligibilityChanged?.Invoke(reason);
         public void ChangeDisplays() => DisplaysChanged?.Invoke();
         public void RefreshShortcutTip() { }
+        public void SetCountdown(CountdownDisplay? display, AppearanceState appearance) => Countdown = display;
         public void Dispose()
         {
             CaptureBinding.Dispose();
@@ -146,9 +150,11 @@ namespace Afterbreak
         public int EntranceStarts { get; private set; }
         public bool EntranceRunning { get; private set; }
         public bool EntranceStoppedWhileVisible { get; private set; }
+        public Action? BeforeShow { get; set; }
 
         public bool TryShow(nint source)
         {
+            BeforeShow?.Invoke();
             if (!CanPlace)
             {
                 return false;
@@ -283,6 +289,7 @@ namespace Afterbreak
         public bool PlacementIsCurrent => IsVisible && RetainedDisplayAvailable;
         public string DescribePlacement() => $"visible={IsVisible} areaMatches={RetainedDisplayAvailable}";
         public int Attempts { get; private set; }
+        public Action? BeforeShow { get; set; }
         public void StopSceneEntrance() { }
 
         public void SetPreview(BreakView view, bool longBreak = false)
@@ -298,6 +305,7 @@ namespace Afterbreak
 
         public bool TryShow(nint source)
         {
+            BeforeShow?.Invoke();
             Attempts++;
             if (!CanPlace || !CanExcludeShellFullscreen)
             {
@@ -559,11 +567,37 @@ namespace Afterbreak
 
         public static WindowAppearance Current { get; private set; } = null!;
         public AppearancePreferences Preferences { get; private set; }
+        public AppearanceState State => AppearancePolicy.Resolve(Preferences, new(false, true, true, 1, 0xFFFFFF, 0));
         public bool Disposed { get; private set; }
 
         public void Track(TestSurface surface, SurfaceMaterial material) { }
         public void Apply(AppearancePreferences preferences) => Preferences = preferences;
         public void Dispose() => Disposed = true;
+    }
+
+    internal sealed class FloatingTimerWindow(Action hide, Action<FloatingTimerPosition> save, FloatingTimerPosition? position) : TestSurface
+    {
+        public static FloatingTimerWindow? Current { get; set; }
+        public nint Handle => 1234;
+        public CountdownDisplay Display { get; private set; }
+        public bool KeepOnTop { get; private set; }
+        public FloatingTimerPosition? OriginalPosition { get; } = position;
+        public int DisplayChanges { get; private set; }
+        public void Present(CountdownDisplay display, bool keepOnTop)
+        {
+            Display = display;
+            KeepOnTop = keepOnTop;
+            IsVisible = true;
+            Current = this;
+        }
+        public void DisplayChanged() => DisplayChanges++;
+        public void SimulateHide() => hide();
+        public void SimulateDrag(FloatingTimerPosition next) => save(next);
+        public void CloseForQuit()
+        {
+            Hide();
+            Close();
+        }
     }
 
     internal sealed class AppearanceSettingsPage(Func<AppearancePreferences, bool> save)

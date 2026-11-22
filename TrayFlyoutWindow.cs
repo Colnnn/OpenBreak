@@ -14,6 +14,7 @@ internal sealed class TrayFlyoutWindow : Window
 
     private readonly StackPanel body = new() { Margin = new Thickness(SurfaceStyle.ControlGap), Spacing = 2 };
     private readonly TextBlock status;
+    private readonly TextBlock countdown;
     private readonly ScrollViewer scroll;
     private readonly Dictionary<TrayCommand, ActionRow> rows = [];
     private Action<bool>? dismiss;
@@ -26,7 +27,8 @@ internal sealed class TrayFlyoutWindow : Window
         new AppearanceSystem(false, false, false, 1, 0xFFFFFF, 0));
     private int VisibleCount => rows.Values.Count(row => row.Item.Visible);
     private int Width => appearance.ScaleWidth(324);
-    private int Height => appearance.ScaleHeight(56 + VisibleCount * 38);
+    private int Height => appearance.ScaleHeight(56 + VisibleCount * 38 +
+        (countdown.Visibility == Visibility.Visible ? 26 : 0));
 
     internal TrayFlyoutWindow()
     {
@@ -34,6 +36,9 @@ internal sealed class TrayFlyoutWindow : Window
         status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Caption);
         status.TextWrapping = TextWrapping.Wrap;
         status.Margin = RowInsets();
+        countdown = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Caption);
+        countdown.TextWrapping = TextWrapping.Wrap;
+        countdown.Margin = RowInsets();
         scroll = SurfaceStyle.Scroll(body);
         var frame = SurfaceStyle.Frame(scroll);
         frame.TabFocusNavigation = KeyboardNavigationMode.Cycle;
@@ -88,6 +93,7 @@ internal sealed class TrayFlyoutWindow : Window
             {
                 body.Children.Add(new MenuFlyoutSeparator());
                 body.Children.Add(status);
+                body.Children.Add(countdown);
             }
             else if (item.Command == TrayCommand.Quit)
             {
@@ -133,6 +139,14 @@ internal sealed class TrayFlyoutWindow : Window
             return;
         }
 
+        if (menuState with { CountdownStatus = state.CountdownStatus } == state &&
+            (menuState.CountdownStatus is null) == (state.CountdownStatus is null))
+        {
+            menuState = state;
+            countdown.Text = state.CountdownStatus ?? "";
+            return;
+        }
+
         var previousHeight = Height;
         var focused = GetFocusedAction();
         SetMenuState(state);
@@ -150,6 +164,8 @@ internal sealed class TrayFlyoutWindow : Window
     {
         menuState = state;
         status.Text = state.ReminderStatus;
+        countdown.Text = state.CountdownStatus ?? "";
+        countdown.Visibility = state.CountdownStatus is null ? Visibility.Collapsed : Visibility.Visible;
         foreach (var item in state.Items())
         {
             var row = rows[item.Command];
@@ -196,6 +212,7 @@ internal sealed class TrayFlyoutWindow : Window
     internal void ApplyAppearance(AppearanceState state)
     {
         SurfaceStyle.ApplyContrast(status, state);
+        SurfaceStyle.ApplyContrast(countdown, state);
         var previousWidth = Width;
         var previousHeight = Height;
         appearance = state;

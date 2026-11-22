@@ -33,8 +33,17 @@ internal sealed partial class AfterbreakSession
         reminderTimer.Interval = TimeSpan.FromMilliseconds(250);
         reminderTimer.Tick += (_, _) => UpdateScheduledReminders();
         desktop.EligibilityChanged += reason => UpdateScheduledReminders(recheckPresentation: true, reason);
-        desktop.DisplaysChanged += () => EndIfPlacementInvalid("display-notification");
+        desktop.DisplaysChanged += () =>
+        {
+            EndIfPlacementInvalid("display-notification");
+            floatingTimer?.DisplayChanged();
+            if (appearancePreferences.TrayCountdown || WantsFloatingTimer)
+            {
+                UpdateReminderStatus(desktop.GetSystemPause(checkPresentation: visible != Surface.Preview));
+            }
+        };
         lastCheckpoint = reminderClock.GetTimestamp();
+        desktop.FloatingTimerHidden = appearancePreferences.FloatingTimer ? false : null;
         TryLoadReminderSettings();
     }
 
@@ -65,8 +74,8 @@ internal sealed partial class AfterbreakSession
 
     private void UpdateReminderTimer()
     {
-        var shouldRun = (reminders.Settings.Enabled && !reminderStorageError) ||
-            main is { CurrentPage: ManagementPage.Focus, AppWindow.IsVisible: true };
+        var shouldRun = !quitting && ((reminders.Settings.Enabled && !reminderStorageError) || WantsFloatingTimer ||
+            main is { CurrentPage: ManagementPage.Focus, AppWindow.IsVisible: true });
         if (shouldRun && !reminderTimer.IsRunning)
         {
             reminderTimer.Start();
@@ -93,6 +102,12 @@ internal sealed partial class AfterbreakSession
         var checkPresentation = recheckPresentation || visible != Surface.Preview ||
             (!preview.HasForeground && !desktop.TrayFlyoutHasForeground);
         var systemPause = desktop.GetSystemPause(checkPresentation);
+        systemPauseForFocus = systemPause;
+        if ((systemPause & CountdownDisplay.PrivacyPauses) != 0 || reminders.ManuallyPaused)
+        {
+            // A checkpoint can wait on SQLite. Hide before doing any storage work.
+            floatingTimer?.Hide();
+        }
         if (!scheduledSurface && visible is (Surface.Warning or Surface.Preview) &&
             (systemPause != ReminderPause.None || reminders.ManuallyPaused))
         {
@@ -168,6 +183,10 @@ internal sealed partial class AfterbreakSession
             }
 
             var source = desktop.WorkWindow();
+            if (intended == Surface.Preview)
+            {
+                floatingTimer?.Hide();
+            }
             var shown = intended == Surface.Warning
                 ? warning.TryShow(source, reminders.IsLongBreak ? "Long break" : "Short break")
                 : preview.TryShow(source);
@@ -247,7 +266,7 @@ internal sealed partial class AfterbreakSession
         {
             reminders.Update(ReminderPause.Interaction);
         }
-        Dismiss();
+        Dismiss(includeFloating: false);
         checkpointDirty = true;
     }
 
@@ -448,9 +467,11 @@ internal sealed partial class AfterbreakSession
         PublishFocusSnapshot();
     }
 
-    private void PublishFocusSnapshot()
+    private void PublishFocusSnapshot(bool includeFloating = true)
     {
-        if (main is not { CurrentPage: ManagementPage.Focus } host)
+        var host = main is { CurrentPage: ManagementPage.Focus } ? main : null;
+        var publishCountdown = appearancePreferences.TrayCountdown || appearancePreferences.FloatingTimer;
+        if (host is null && !publishCountdown)
         {
             return;
         }
@@ -472,11 +493,16 @@ internal sealed partial class AfterbreakSession
         {
             pauses |= ReminderPause.Interaction;
         }
-        host.FocusHome.SetSnapshot(new FocusSnapshot(settings.Enabled, reminders.Phase,
+        var snapshot = new FocusSnapshot(settings.Enabled, reminders.Phase,
             WholeSeconds(reminders.Remaining), pauses, reminders.CompletedShorts,
             WholeSeconds(settings.BreakLength(reminders.CompletedShorts)), nextFocusTask, focusTaskUnavailable,
             reminderStorageError, previewPhase, previewPhase is null ? 0 : WholeSeconds(ManualPreviewRemaining),
-            AvailableFocusActions(systemPauseForFocus), settings.LongBreaks, settings.ShortsBeforeLong, settings.SnoozeSeconds));
+            AvailableFocusActions(systemPauseForFocus), settings.LongBreaks, settings.ShortsBeforeLong, settings.SnoozeSeconds);
+        host?.FocusHome.SetSnapshot(snapshot);
+        if (publishCountdown)
+        {
+            PublishCountdownDisplays(snapshot, includeFloating);
+        }
     }
 
     private static int WholeSeconds(TimeSpan remaining) => Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds));

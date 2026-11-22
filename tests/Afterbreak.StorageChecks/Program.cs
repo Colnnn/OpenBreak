@@ -5,7 +5,14 @@ namespace Afterbreak;
 
 internal static class Program
 {
-    private const string RemoveV8AppearanceColumns = """
+    private const string RemoveV9Countdown = """
+        ALTER TABLE appearance_preferences DROP COLUMN tray_countdown;
+        ALTER TABLE appearance_preferences DROP COLUMN floating_timer;
+        ALTER TABLE appearance_preferences DROP COLUMN floating_on_top;
+        DROP TABLE floating_timer_position;
+        """;
+
+    private const string RemoveV8AppearanceColumns = RemoveV9Countdown + """
         ALTER TABLE appearance_preferences DROP COLUMN scene_motion;
         ALTER TABLE appearance_preferences DROP COLUMN break_start_sound;
         """;
@@ -42,6 +49,7 @@ internal static class Program
             Console.WriteLine("PASS appearance upgrade and rollback preserve task order, archive, shortcut, guide and reminder records");
             CheckAppearanceV8(temporary.FullName);
             Console.WriteLine("PASS v8 settings defaults, roundtrip, validation and atomic appearance writes");
+            CheckCountdownV9(temporary.FullName);
             CheckWorkPauseMigration(temporary.FullName);
             Console.WriteLine("PASS version-five migration, durable work pause and rejection of invalid work-pause state");
             CheckRhythmMigration(temporary.FullName);
@@ -53,6 +61,78 @@ internal static class Program
         {
             temporary.Delete(recursive: true);
         }
+    }
+
+    private static void CheckCountdownV9(string folder)
+    {
+        var path = Path.Combine(folder, "countdown-v8.db");
+        var store = new TaskStore(path);
+        store.Add("Keep this task", "Keep this note");
+        store.Add("Keep this ordering");
+        var tasksBefore = TaskFingerprint(path);
+        var appearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight, SceneMotion.Off, true);
+        store.SaveAppearance(appearance);
+        var rhythm = ReminderSettings.Default with { Enabled = true, WorkSeconds = 6332, LongBreaks = false, SnoozeSeconds = 91 };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Work, TimeSpan.FromSeconds(90), 0, false,
+            TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero)) { WorkPaused = true };
+        store.SaveReminders(rhythm, checkpoint);
+        ExecuteSql(path, $"{RemoveV9Countdown} PRAGMA user_version = 8;");
+
+        var malformed = Path.Combine(folder, "countdown-malformed-v8.db");
+        File.Copy(path, malformed);
+        ExecuteSql(malformed, """
+            PRAGMA ignore_check_constraints = ON;
+            UPDATE appearance_preferences SET break_start_sound = 2;
+            """);
+        var beforeMalformed = File.ReadAllBytes(malformed);
+        ExpectStorageError(() => new TaskStore(malformed).LoadAppearance());
+        Require(File.ReadAllBytes(malformed).SequenceEqual(beforeMalformed) && Scalar(malformed, "PRAGMA user_version") is 8L,
+            "a malformed v8 appearance row rolls back all countdown schema changes");
+
+        var conflict = Path.Combine(folder, "countdown-conflict-v8.db");
+        File.Copy(path, conflict);
+        ExecuteSql(conflict, "CREATE TABLE floating_timer_position (unrelated_value TEXT);");
+        var beforeConflict = File.ReadAllBytes(conflict);
+        ExpectStorageError(() => new TaskStore(conflict).LoadAppearance());
+        Require(File.ReadAllBytes(conflict).SequenceEqual(beforeConflict) && Scalar(conflict, "PRAGMA user_version") is 8L,
+            "a placement schema failure rolls back previously added countdown columns");
+
+        Require(store.LoadAppearance() == appearance && store.LoadFloatingTimerPosition() is null &&
+            store.LoadReminders() == (rhythm, checkpoint) && TaskFingerprint(path) == tasksBefore &&
+            Scalar(path, "PRAGMA user_version") is 9L,
+            "the v9 lift preserves order, rhythm, work pause, theme, motion and sound with both countdowns off");
+        Console.WriteLine("PASS v9 countdown migration, independent defaults and rollback");
+
+        var selected = appearance with { TrayCountdown = true, FloatingTimer = true, FloatingTimerOnTop = true };
+        var position = new FloatingTimerPosition(@"\\.\DISPLAY2", 6587, 3219);
+        store.SaveAppearance(selected);
+        store.SaveFloatingTimerPosition(position);
+        Require(new TaskStore(path).LoadAppearance() == selected && new TaskStore(path).LoadFloatingTimerPosition() == position,
+            "countdown preferences and placement survive independent reads after reopen");
+
+        ExecuteSql(path, """
+            CREATE TRIGGER reject_countdown BEFORE UPDATE ON appearance_preferences
+            BEGIN
+                UPDATE tasks SET title = 'Unexpected preference trigger change';
+                SELECT RAISE(IGNORE);
+            END;
+            CREATE TRIGGER alter_position AFTER UPDATE ON floating_timer_position
+            BEGIN
+                UPDATE tasks SET title = 'Unexpected placement trigger change';
+                UPDATE floating_timer_position SET horizontal = 3000 WHERE id = 1;
+            END;
+            """);
+        ExpectStorageError(() => store.SaveAppearance(selected with { TrayCountdown = false }));
+        ExpectStorageError(() => store.SaveFloatingTimerPosition(position with { Horizontal = 4000 }));
+        Require(store.LoadAppearance() == selected && store.LoadFloatingTimerPosition() == position &&
+            TaskFingerprint(path) == tasksBefore && store.LoadReminders() == (rhythm, checkpoint),
+            "ignored preference and rewritten position updates roll back their transactions");
+
+        ExecuteSql(path, "PRAGMA ignore_check_constraints = ON; UPDATE floating_timer_position SET vertical = -1;");
+        ExpectStorageError(() => store.LoadFloatingTimerPosition());
+        Require(store.LoadAppearance() == selected && store.LoadReminders() == (rhythm, checkpoint),
+            "malformed placement is rejected without touching settings or rhythm");
+        Console.WriteLine("PASS independent countdown storage, readback and rollback");
     }
 
     private static void RoundTrip(string path)
@@ -222,7 +302,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 8L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 9L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -294,7 +374,7 @@ internal static class Program
         Require(Scalar(blocked, "PRAGMA user_version") is 5L && File.ReadAllBytes(blocked).SequenceEqual(bytes),
             "An invalid version-five checkpoint leaves the old schema and file byte-identical.");
 
-        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 8L &&
+        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 9L &&
             Scalar(path, "SELECT work_paused FROM reminder_state") is 0L,
             "A legacy reminder defaults to work unpaused and keeps its presentation pause and cadence.");
         Require(Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")) &&
@@ -348,7 +428,7 @@ internal static class Program
         WriteLegacyRhythmSettings(path, version: 6);
         var tasks = TaskFingerprint(path);
         var checkpoint = Scalar(path, "SELECT checkpoint FROM reminder_state");
-        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 8L &&
+        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 9L &&
             store.LoadCapturePreferences() == new CapturePreferences(shortcut, true) && store.LoadAppearance() == appearance &&
             TaskFingerprint(path) == tasks && Equals(checkpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")),
             "v6 migration keeps all exact old durations, opted-in hours, settings, task order and paused snooze while adding defaults");
@@ -463,7 +543,7 @@ internal static class Program
 
             var migrated = store.LoadReminders();
             var reopened = new TaskStore(path);
-            Require(Scalar(path, "PRAGMA user_version") is 8L && migrated == reopened.LoadReminders() &&
+            Require(Scalar(path, "PRAGMA user_version") is 9L && migrated == reopened.LoadReminders() &&
                 migrated.Settings == (timerOnly.HasValue ? settings : ReminderSettings.Default) &&
                 migrated.Checkpoint == (timerOnly.HasValue ? checkpoint : null) &&
                 Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
@@ -552,6 +632,7 @@ internal static class Program
         WriteLegacyReminderSettings(path, reminders);
         ExecuteSql(path, """
             DROP TABLE appearance_preferences;
+            DROP TABLE floating_timer_position;
             DROP TABLE capture_preferences;
             ALTER TABLE reminder_state DROP COLUMN work_paused;
             PRAGMA user_version = 2;
@@ -560,7 +641,7 @@ internal static class Program
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 8L && TaskFingerprint(path) == fingerprint &&
+        Require(Scalar(path, "PRAGMA user_version") is 9L && TaskFingerprint(path) == fingerprint &&
             migrated.LoadReminders() == (reminders, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "Migration keeps tasks, the timer-only choice and the checkpoint.");
@@ -629,6 +710,7 @@ internal static class Program
         store.DismissCaptureGuide();
         ExecuteSql(path, """
             DROP TABLE appearance_preferences;
+            DROP TABLE floating_timer_position;
             ALTER TABLE reminder_state DROP COLUMN work_paused;
             PRAGMA user_version = 3;
             """);
@@ -636,7 +718,7 @@ internal static class Program
         var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
         var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
-        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 8L &&
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 9L &&
             store.LoadReminders() == (settings, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "v3 upgrade defaults to System/Dusk and maintains the reminder checkpoint");
@@ -697,7 +779,7 @@ internal static class Program
             "A failing second column addition rolls back the first and preserves the v7 file.");
 
         Require(store.LoadAppearance() == prior && prior.Motion == SceneMotion.FollowWindows && !prior.BreakStartSound &&
-            Scalar(path, "PRAGMA user_version") is 8L && store.LoadReminders() == (settings, paused) &&
+            Scalar(path, "PRAGMA user_version") is 9L && store.LoadReminders() == (settings, paused) &&
             Equals(Scalar(path, "SELECT settings || checkpoint || work_paused FROM reminder_state WHERE id = 1"), rhythm) &&
             TaskFingerprint(path) == tasks && store.LoadCapturePreferences() == new CapturePreferences(shortcut, true),
             "A v7 upgrade adds safe defaults and preserves the stored scene, theme, tasks, capture and rhythm byte-for-byte.");

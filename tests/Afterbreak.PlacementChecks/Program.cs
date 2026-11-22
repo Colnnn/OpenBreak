@@ -53,3 +53,16 @@ Check(MonitorPlacement.Place(topTaskbarArea, 324, 400, 1, anchor: new PixelRect(
 Check(MonitorPlacement.Place(tiny, 600, 750, 2, anchor: new PixelRect(-3, 45, 1, 1)) == tiny &&
     MonitorPlacement.Place(primary, 324, 400, 1, anchor: default(PixelRect)) is null,
     "tray flyout clamps to tiny work areas and rejects an invalid anchor");
+
+var timer = MonitorPlacement.Place(left, 218, 94, 1.5)!.Value;
+var dragged = MonitorPlacement.PositionWithin(left, timer, 7500, 2500, 10000);
+Check(left.Contains(dragged) &&
+    MonitorPlacement.RelativeOffset(dragged.X, left.X, left.Width - dragged.Width, 10000) is >= 7495 and <= 7505 &&
+    MonitorPlacement.RelativeOffset(dragged.Y, left.Y, left.Height - dragged.Height, 10000) is >= 2494 and <= 2506,
+    "floating timer placement roundtrips relative to a scaled monitor with negative coordinates");
+var resized = MonitorPlacement.Place(left, 218, 94, 2)!.Value;
+var restored = MonitorPlacement.PositionWithin(left, resized, 7500, 2500, 10000);
+Check(left.Contains(restored) && restored.Width == 436 && restored.Height == 188 && restored.X != dragged.X &&
+    MonitorPlacement.PositionWithin(tiny, tiny, 7500, 2500, 10000) == tiny &&
+    MonitorPlacement.RelativeOffset(1000, tiny.X, 4, 10000) == 10000,
+    "floating position stays within work areas after resizing and clamps offscreen drag offsets");

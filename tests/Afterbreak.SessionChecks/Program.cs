@@ -24,6 +24,7 @@ internal static class Program
             CheckMainNavigation(Path.Combine(temporary.FullName, "unified-shell.db"));
             CheckLaunchReveal(Path.Combine(temporary.FullName, "launch-reveal.db"));
             CheckFocusHome(Path.Combine(temporary.FullName, "focus-home.db"));
+            CountdownChecks.Run(Path.Combine(temporary.FullName, "countdown.db"));
             CheckRhythmSession(Path.Combine(temporary.FullName, "rhythm.db"));
             CheckQuietReminderActionFailure(Path.Combine(temporary.FullName, "quiet-reminder-error.db"));
             PlacementLifecycleChecks.Run(temporary.FullName);

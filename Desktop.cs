@@ -23,8 +23,10 @@ internal sealed class Desktop : IDisposable
     private const uint TrayIconId = 1;
     private const uint NoRepeat = 0x4000;
     private const uint ForegroundEvent = 3;
+    private const int MaxTrayAddAttempts = 6;
     private const string WindowClass = "Afterbreak.Tray";
     private const string ShellFullscreenExclusion = "NonRudeHWND";
+    private static readonly SubclassProcedure activationGuard = PreventInputActivation;
 
     private readonly WindowProcedure procedure;
     private readonly WinEventProcedure foregroundProcedure;
@@ -36,11 +38,16 @@ internal sealed class Desktop : IDisposable
     private readonly DispatcherQueue dispatcher;
     private readonly DisplayAreaWatcher? displayWatcher;
     private readonly TrayMenuLifetime trayMenu = new();
+    private readonly TrayIconLifetime trayIcon;
     private readonly uint process = (uint)Environment.ProcessId;
     private nint lastWorkWindow;
     private nint lastOwnWorkWindow;
     private bool iconAdded;
     private bool versionFourIcon;
+    private DispatcherQueueTimer? trayAddRetry;
+    private int trayAddAttempts;
+    private string? countdownStatus;
+    private TrayIconDesign? countdownDesign;
     private TrayFlyoutWindow? trayFlyout;
     private WindowAppearance? trayAppearance;
     private Func<nint, Action<TrayCommand>>? bindTrayCommand;
@@ -85,13 +92,16 @@ internal sealed class Desktop : IDisposable
         CaptureBinding = new CaptureBinding(
             (id, shortcut) => RegisterHotKey(window, id, shortcut.Modifiers | NoRepeat, shortcut.Key),
             id => UnregisterHotKey(window, id) || Marshal.GetLastPInvokeError() == 1419); // ERROR_HOTKEY_NOT_REGISTERED
-        AddIcon();
+        trayIcon = new TrayIconLifetime(LoadIcon(0, 32516), TrayCountdownIcon.Create, icon => TrayCountdownIcon.DestroyIcon(icon));
+        RefreshTrayIcon();
         displayWatcher = StartDisplayWatcher();
     }
 
     internal CaptureBinding CaptureBinding { get; }
     internal string? DismissLabel { get; set; }
     internal nint MainHandle { get; set; }
+    internal nint FloatingTimerHandle { get; set; }
+    internal bool? FloatingTimerHidden { get; set; }
     internal bool PreviewAvailable { get; set; } = true;
     internal bool MenuOpen => trayMenu.Current is not null;
     internal bool TrayFlyoutHasForeground => MenuOpen && trayFlyout?.HasForeground == true;
@@ -184,6 +194,26 @@ internal sealed class Desktop : IDisposable
 
     internal static nint PrimaryMonitor() => MonitorFromPoint(default, 1);
 
+    internal static string? MonitorName(nint monitor)
+    {
+        var information = new NamedMonitorInformation { Size = Marshal.SizeOf<NamedMonitorInformation>() };
+        return monitor != 0 && GetNamedMonitorInfo(monitor, ref information) ? information.Name : null;
+    }
+
+    internal static nint MonitorNamed(string name)
+    {
+        nint found = 0;
+        _ = EnumDisplayMonitors(0, 0, (monitor, _, _, _) =>
+        {
+            if (MonitorName(monitor) == name)
+            {
+                found = monitor;
+            }
+            return found == 0;
+        }, 0);
+        return found;
+    }
+
     internal static PixelRect? MonitorArea(nint monitor, bool workArea)
     {
         var information = new MonitorInformation { Size = Marshal.SizeOf<MonitorInformation>() };
@@ -210,11 +240,36 @@ internal sealed class Desktop : IDisposable
         return rect.IsValid && SetWindowPos(hwnd, 0, rect.X, rect.Y, rect.Width, rect.Height, keepZOrderAndFocus);
     }
 
+    internal static bool SetTopmostWithoutActivation(nint hwnd, bool topmost)
+    {
+        const uint keepSizePositionAndFocus = 0x0001 | 0x0002 | 0x0010 | 0x0200;
+        return SetWindowPos(hwnd, topmost ? -1 : -2, 0, 0, 0, 0, keepSizePositionAndFocus);
+    }
+
+    internal static (int X, int Y)? CursorPosition() => GetCursorPos(out var point) ? (point.X, point.Y) : null;
+
     internal static void AvoidActivation(nint window)
     {
         const int extendedStyle = -20;
         const int noActivateStyle = 0x08000000;
         _ = SetWindowLongPtr(window, extendedStyle, GetWindowLongPtr(window, extendedStyle) | noActivateStyle);
+    }
+
+    internal static bool GuardAgainstInputActivation(nint hwnd) => SetWindowSubclass(hwnd, activationGuard, 0, 0);
+
+    private static nint PreventInputActivation(nint hwnd, uint message, nuint wParam, nint lParam, nuint id, nuint data)
+    {
+        const uint mouseActivate = 0x0021, pointerActivate = 0x024B, nonClientDestroy = 0x0082;
+        if (message is mouseActivate or pointerActivate)
+        {
+            // Active-window tracking can send WM_MOUSEACTIVATE even with WS_EX_NOACTIVATE.
+            return 3; // MA_NOACTIVATE and PA_NOACTIVATE, while preserving input.
+        }
+        if (message == nonClientDestroy)
+        {
+            _ = RemoveWindowSubclass(hwnd, activationGuard, id);
+        }
+        return DefSubclassProc(hwnd, message, wParam, lParam);
     }
 
     // The Shell must not count our break as a fullscreen app when assessing notifications.
@@ -238,6 +293,7 @@ internal sealed class Desktop : IDisposable
     public void Dispose()
     {
         disposed = true;
+        trayAddRetry?.Stop();
         DismissTray();
         trayFlyout?.CloseForQuit();
         if (displayWatcher is not null)
@@ -262,6 +318,7 @@ internal sealed class Desktop : IDisposable
             var data = IconData();
             ShellNotifyIcon(2, ref data);
         }
+        trayIcon.Dispose();
 
         DestroyWindow(window);
         UnregisterClass(WindowClass, module);
@@ -327,6 +384,10 @@ internal sealed class Desktop : IDisposable
 
     private void ObserveWorkWindow(nint candidate)
     {
+        if (candidate == FloatingTimerHandle)
+        {
+            return;
+        }
         if (candidate != 0 && candidate == MainHandle)
         {
             lastOwnWorkWindow = candidate;
@@ -338,29 +399,90 @@ internal sealed class Desktop : IDisposable
         }
     }
 
-    private void AddIcon()
+    internal void SetCountdown(CountdownDisplay? countdown, AppearanceState appearance)
     {
-        var data = IconData();
-        data.Flags = 0x87; // Show tip, tip text, icon and callback message.
-        data.CallbackMessage = TrayMessage;
-        data.Icon = LoadIcon(0, 32516); // Shared system information icon.
-        iconAdded = ShellNotifyIcon(0, ref data);
-        versionFourIcon = false;
-        if (iconAdded)
+        var statusChanged = countdownStatus != countdown?.Status;
+        countdownStatus = countdown?.Status;
+        countdownDesign = countdown is { Glyphs: { } glyphs } display
+            ? new TrayIconDesign(glyphs, display.FinalMinute, TrayIconSize(),
+                appearance.HighContrast ? appearance.WindowColor : display.FinalMinute ? 0x812E2AU : 0x1B3034U,
+                appearance.HighContrast ? appearance.TextColor : display.FinalMinute ? 0xFFF4D3U : 0xFFFFFFU)
+            : null;
+        RefreshTrayIcon();
+        if (statusChanged)
         {
-            data.Version = 4;
-            versionFourIcon = ShellNotifyIcon(4, ref data);
+            RefreshTrayFlyout();
         }
     }
 
-    internal void RefreshShortcutTip()
+    private static int TrayIconSize()
     {
-        if (iconAdded)
+        var taskbar = FindWindow("Shell_TrayWnd", null);
+        var dpi = taskbar != 0 ? GetDpiForWindow(taskbar) : 0;
+        return Math.Clamp(GetSystemMetricsForDpi(49, dpi == 0 ? 96U : dpi), 16, 96); // SM_CXSMICON
+    }
+
+    internal void RefreshShortcutTip() => RefreshTrayIcon();
+
+    private void RefreshTrayIcon()
+    {
+        var add = !iconAdded;
+        if (disposed || (add && (trayAddRetry?.IsRunning == true || trayAddAttempts >= MaxTrayAddAttempts)))
+        {
+            return;
+        }
+        if (add)
+        {
+            trayAddAttempts++;
+        }
+
+        var tip = countdownStatus is { } countdown ? $"Afterbreak · {countdown}" :
+            CaptureBinding.Active is { } active ? $"Afterbreak · {active}" : "Afterbreak · Shortcut unavailable";
+        var result = trayIcon.Apply(countdownDesign, tip, add, (icon, tooltip, changeIcon, changeTip) =>
         {
             var data = IconData();
-            data.Flags = 0x84; // NIF_TIP | NIF_SHOWTIP
-            ShellNotifyIcon(1, ref data);
+            data.Flags = (add ? 0x1U : 0U) | (changeIcon ? 0x2U : 0U) | (changeTip ? 0x84U : 0U);
+            data.CallbackMessage = TrayMessage;
+            data.Icon = icon;
+            data.Tip = tooltip;
+            return ShellNotifyIcon(add ? 0U : 1U, ref data);
+        });
+        if (add && result)
+        {
+            iconAdded = true;
+            trayAddRetry?.Stop();
+            trayAddAttempts = 0;
+            var data = IconData();
+            data.Version = 4;
+            versionFourIcon = ShellNotifyIcon(4, ref data);
         }
+        else if (add)
+        {
+            RetryAddingTrayIcon();
+        }
+    }
+
+    private void RetryAddingTrayIcon()
+    {
+        if (trayAddAttempts >= MaxTrayAddAttempts)
+        {
+            return;
+        }
+        if (trayAddRetry is null)
+        {
+            trayAddRetry = dispatcher.CreateTimer();
+            trayAddRetry.IsRepeating = false;
+            trayAddRetry.Tick += (sender, _) =>
+            {
+                sender.Stop();
+                if (!disposed && !iconAdded)
+                {
+                    RefreshTrayIcon();
+                }
+            };
+        }
+        trayAddRetry.Interval = TimeSpan.FromMilliseconds(200 << (trayAddAttempts - 1));
+        trayAddRetry.Start();
     }
 
     private NotifyIconData IconData() => new()
@@ -368,14 +490,15 @@ internal sealed class Desktop : IDisposable
         Size = (uint)Marshal.SizeOf<NotifyIconData>(),
         Window = window,
         Id = TrayIconId,
-        Tip = CaptureBinding.Active is { } active ? $"Afterbreak · {active}" : "Afterbreak · Shortcut unavailable",
+        Tip = "",
         Info = "",
         InfoTitle = "",
     };
 
     private TrayMenuState CurrentTrayMenu() => new(CaptureBinding.Active?.ToString(),
         PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None,
-        DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable, SnoozeSeconds);
+        DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable, SnoozeSeconds,
+        countdownDesign is not null ? countdownStatus : null, FloatingTimerHidden);
 
     internal void RefreshTrayFlyout()
     {
@@ -582,7 +705,14 @@ internal sealed class Desktop : IDisposable
         if (message == taskbarCreated && taskbarCreated != 0)
         {
             DismissTray();
-            AddIcon();
+            iconAdded = versionFourIcon = false;
+            trayAddRetry?.Stop();
+            trayAddAttempts = 0;
+            if (countdownDesign is { } design)
+            {
+                countdownDesign = design with { Size = TrayIconSize() };
+            }
+            RefreshTrayIcon();
             return 0;
         }
 
@@ -644,6 +774,18 @@ internal sealed class Desktop : IDisposable
         internal Rect Work;
         internal uint Flags;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NamedMonitorInformation
+    {
+        internal int Size;
+        internal Rect Bounds, Work;
+        internal uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] internal string Name;
+    }
+
+    private delegate bool MonitorEnumerator(nint monitor, nint dc, nint bounds, nint context);
+    private delegate nint SubclassProcedure(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { internal int Left, Top, Right, Bottom; }
@@ -720,6 +862,20 @@ internal sealed class Desktop : IDisposable
     private static extern nint MonitorFromPoint(Point point, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(nint monitor, ref MonitorInformation information);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW", ExactSpelling = true)]
+    private static extern bool GetNamedMonitorInfo(nint monitor, ref NamedMonitorInformation information);
+    [DllImport("user32.dll")]
+    private static extern bool EnumDisplayMonitors(nint dc, nint clip, MonitorEnumerator enumerate, nint context);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint FindWindow(string? className, string? title);
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+    [DllImport("comctl32.dll")]
+    private static extern bool SetWindowSubclass(nint window, SubclassProcedure callback, nuint id, nuint data);
+    [DllImport("comctl32.dll")]
+    private static extern bool RemoveWindowSubclass(nint window, SubclassProcedure callback, nuint id);
+    [DllImport("comctl32.dll")]
+    private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);
     [DllImport("shcore.dll")]
     private static extern int GetScaleFactorForMonitor(nint monitor, out int scale);
     [DllImport("user32.dll")]

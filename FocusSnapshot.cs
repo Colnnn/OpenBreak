@@ -22,4 +22,8 @@ internal sealed record FocusSnapshot(bool Enabled, ReminderPhase Phase, int Seco
     int SnoozeSeconds = ReminderSettings.DefaultSnoozeSeconds)
 {
     internal bool NextBreakIsLong => LongBreaks && CompletedShorts >= ShortsBeforeLong;
+
+    internal static string FormatTime(int seconds) => seconds >= 3600
+        ? $"{seconds / 3600}:{seconds / 60 % 60:00}:{seconds % 60:00}"
+        : $"{seconds / 60:00}:{seconds % 60:00}";
 }

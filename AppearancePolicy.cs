@@ -3,10 +3,11 @@ namespace Afterbreak;
 internal enum AppearanceTheme { System, Light, Dark }
 internal enum BreakScene { Dusk, Daylight }
 internal enum SceneMotion { FollowWindows, Off }
-internal enum SurfaceMaterial { Mica, Capture, Warning, Break, Tray }
+internal enum SurfaceMaterial { Mica, Capture, Warning, Break, Tray, FloatingTimer }
 
 internal sealed record AppearancePreferences(AppearanceTheme Theme, BreakScene Scene,
-    SceneMotion Motion = SceneMotion.FollowWindows, bool BreakStartSound = false)
+    SceneMotion Motion = SceneMotion.FollowWindows, bool BreakStartSound = false,
+    bool TrayCountdown = false, bool FloatingTimer = false, bool FloatingTimerOnTop = false)
 {
     internal static AppearancePreferences Default { get; } = new(AppearanceTheme.System, BreakScene.Dusk);
     internal bool IsValid => Enum.IsDefined(Theme) && Enum.IsDefined(Scene) && Enum.IsDefined(Motion);

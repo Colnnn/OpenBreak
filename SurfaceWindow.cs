@@ -5,7 +5,7 @@ namespace Afterbreak;
 
 internal static class SurfaceWindow
 {
-    internal static void Configure(Window window, bool noActivate)
+    internal static void Configure(Window window, bool noActivate, bool alwaysOnTop = true)
     {
         var appWindow = window.AppWindow;
         var presenter = OverlappedPresenter.Create();
@@ -13,7 +13,7 @@ internal static class SurfaceWindow
         presenter.IsResizable = false;
         presenter.IsMaximizable = false;
         presenter.IsMinimizable = false;
-        presenter.IsAlwaysOnTop = true;
+        presenter.IsAlwaysOnTop = alwaysOnTop;
         appWindow.SetPresenter(presenter);
         appWindow.IsShownInSwitchers = false;
         if (noActivate)
@@ -48,12 +48,12 @@ internal static class SurfaceWindow
     }
 
     private static bool TryPlaceIn(Window window, nint monitor, PixelRect area, int widthDip, int heightDip,
-        out SurfacePlacement placement, bool atCorner, PixelRect? anchor = null)
+        out SurfacePlacement placement, bool atCorner, PixelRect? anchor = null, FloatingTimerPosition? relative = null)
     {
         placement = default;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var scale = Desktop.MonitorForWindow(hwnd) == monitor ? Desktop.OwnedWindowScale(hwnd) : Desktop.MonitorScale(monitor);
-        if (MonitorPlacement.Place(area, widthDip, heightDip, scale, atCorner, anchor) is not { } provisional ||
+        if (Place(scale) is not { } provisional ||
             !MoveIfNeeded(hwnd, provisional) || Desktop.MonitorForWindow(hwnd) != monitor)
         {
             return false;
@@ -61,7 +61,7 @@ internal static class SurfaceWindow
 
         // Measure the owned PerMonitorV2 window on the target display, never the invoking app.
         var actualScale = Desktop.OwnedWindowScale(hwnd);
-        if (MonitorPlacement.Place(area, widthDip, heightDip, actualScale, atCorner, anchor) is not { } exact ||
+        if (Place(actualScale) is not { } exact ||
             !MoveIfNeeded(hwnd, exact))
         {
             return false;
@@ -69,6 +69,28 @@ internal static class SurfaceWindow
 
         var candidate = new SurfacePlacement(monitor, area, exact, UsesWorkArea: true, OwnedScale: actualScale);
         return Confirm(hwnd, candidate, out placement);
+
+        PixelRect? Place(double scale)
+        {
+            var fitted = MonitorPlacement.Place(area, widthDip, heightDip, scale, atCorner, anchor);
+            return relative is { } saved && fitted is { } bounds
+                ? MonitorPlacement.PositionWithin(area, bounds, saved.Horizontal, saved.Vertical, FloatingTimerPosition.Extent)
+                : fitted;
+        }
+    }
+
+    internal static bool TryPlaceFloatingTimer(Window window, FloatingTimerPosition? position, int widthDip, int heightDip,
+        out SurfacePlacement placement)
+    {
+        placement = default;
+        var monitor = position is { } saved ? Desktop.MonitorNamed(saved.Monitor) : 0;
+        if (Desktop.MonitorArea(monitor, workArea: true) is { } savedArea)
+        {
+            return TryPlaceIn(window, monitor, savedArea, widthDip, heightDip, out placement, atCorner: true, relative: position);
+        }
+        monitor = Desktop.PrimaryMonitor();
+        return Desktop.MonitorArea(monitor, workArea: true) is { } primaryArea &&
+            TryPlaceIn(window, monitor, primaryArea, widthDip, heightDip, out placement, atCorner: true);
     }
 
     internal static bool TryPlaceBreak(Window window, nint source, out SurfacePlacement placement)

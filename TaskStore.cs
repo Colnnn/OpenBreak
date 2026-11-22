@@ -16,7 +16,7 @@ internal sealed partial class TaskStore(string path)
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 7;
+    private const int SchemaVersion = 8;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static TaskStore ForCurrentUser() => new(Path.Combine(
@@ -261,13 +261,15 @@ internal sealed partial class TaskStore(string path)
                 }
                 if (version >= 4)
                 {
-                    using var appearance = Command(connection, transaction,
-                        "SELECT id, theme, scene FROM appearance_preferences LIMIT 0");
-                    using (appearance.ExecuteReader()) { }
+                    MigrateAppearance(connection, transaction);
                 }
-                if (version >= 2)
+                if (version is >= 2 and < 7)
                 {
                     MigrateReminderSettings(connection, transaction, version);
+                }
+                else if (version == 7)
+                {
+                    ReadReminders(connection, transaction);
                 }
                 using var migration = Command(connection, transaction, $"""
                     {(version == 1 ? ReminderTable : "")}

@@ -17,6 +17,7 @@ internal sealed partial class AfterbreakSession
     private readonly CaptureOptions captureOptions;
     private readonly WindowAppearance appearance;
     private readonly BreakDiagnostics? diagnostics;
+    private readonly Action? playBreakCue;
     private MainWindow? main;
     private AppearancePreferences appearancePreferences = AppearancePreferences.Default;
     private bool appearanceLoadFailed;
@@ -29,10 +30,12 @@ internal sealed partial class AfterbreakSession
     private MainWindow.FocusBookmark? captureFocus;
 
     internal AfterbreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
-        TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null)
+        TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null,
+        Action? playBreakCue = null)
     {
         this.exit = exit;
         this.diagnostics = diagnostics;
+        this.playBreakCue = playBreakCue;
         this.tasks = tasks ?? TaskStore.ForCurrentUser();
         capture = new CaptureWindow(SaveTask, () => Dismiss(), captureMotionStudy);
         warning = new WarningWindow(SnoozeReminder, SkipReminder);
@@ -334,6 +337,14 @@ internal sealed partial class AfterbreakSession
         return true;
     }
 
+    private void PlayBreakStartCue()
+    {
+        if (!appearanceLoadFailed && appearancePreferences.BreakStartSound)
+        {
+            playBreakCue?.Invoke();
+        }
+    }
+
     private void DismissBreakForSettings()
     {
         if (scheduledSurface)
@@ -453,6 +464,7 @@ internal sealed partial class AfterbreakSession
             visible = Surface.Preview;
             desktop.DismissLabel = "End break";
             StartClock();
+            PlayBreakStartCue();
             PublishFocusSnapshot();
         }
         else if (visible == Surface.Preview)

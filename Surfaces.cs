@@ -2,13 +2,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.System;
-using Windows.UI;
-using Windows.UI.Text;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace Afterbreak;
@@ -41,7 +38,7 @@ internal sealed class CaptureWindow : Window
         this.save = save;
         this.captureMotionStudy = captureMotionStudy;
         Title = "Afterbreak · Capture task";
-        title = SurfaceStyle.Label("Capture a task", 23, FontWeights.SemiBold);
+        title = SurfaceStyle.Label("Capture a task", SurfaceStyle.SurfaceTitle, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         input = new TextBox
         {
@@ -66,7 +63,7 @@ internal sealed class CaptureWindow : Window
         };
         AutomationProperties.SetName(addNextStep, "Add next step");
         addNextStep.Click += (_, _) => ExpandNextStep();
-        hint = SurfaceStyle.SecondaryLabel(CaptureHint, 12);
+        hint = SurfaceStyle.SecondaryLabel(CaptureHint, SurfaceStyle.Caption);
         hint.TextWrapping = TextWrapping.Wrap;
 
         var saveButton = new Button
@@ -80,12 +77,12 @@ internal sealed class CaptureWindow : Window
         }
         saveButton.Click += (_, _) => Save();
 
-        var footer = new Grid { ColumnSpacing = 12 };
+        var footer = new Grid { ColumnSpacing = SurfaceStyle.ContentGap };
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         footer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var instructions = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        var instructions = new StackPanel { Spacing = SurfaceStyle.TightGap, VerticalAlignment = VerticalAlignment.Center };
         instructions.Children.Add(addNextStep);
         instructions.Children.Add(hint);
         footer.Children.Add(instructions);
@@ -97,10 +94,14 @@ internal sealed class CaptureWindow : Window
             Grid.SetColumn(saveButton, stack ? 0 : 1);
             Grid.SetRow(saveButton, stack ? 1 : 0);
             Grid.SetColumnSpan(instructions, stack ? 2 : 1);
-            footer.RowSpacing = stack ? 8 : 0;
+            footer.RowSpacing = stack ? SurfaceStyle.ControlGap : 0;
         };
 
-        body = new StackPanel { Spacing = 12, Margin = new Thickness(20, 17, 20, 17) };
+        body = new StackPanel
+        {
+            Spacing = SurfaceStyle.ContentGap,
+            Margin = new Thickness(SurfaceStyle.PageInset, SurfaceStyle.SectionGap, SurfaceStyle.PageInset, SurfaceStyle.SectionGap),
+        };
         body.Children.Add(title);
         body.Children.Add(input);
         body.Children.Add(nextStep);
@@ -290,23 +291,25 @@ internal sealed class WarningWindow : Window
     internal WarningWindow(Action snooze, Action skip)
     {
         Title = "Afterbreak · Preview warning";
-        title = SurfaceStyle.Label("", 20, FontWeights.SemiBold);
+        title = SurfaceStyle.Label("", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
-        detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", 13);
+        detail = SurfaceStyle.SecondaryLabel("Your 10-second preview is about to begin.", SurfaceStyle.Body);
         detail.TextWrapping = TextWrapping.Wrap;
         SetSnoozeDuration(ReminderSettings.DefaultSnoozeSeconds);
         snoozeButton.Click += (_, _) => snooze();
         var skipButton = new Button { Content = "Skip break" };
         skipButton.Click += (_, _) => skip();
-        actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SurfaceStyle.ControlGap,
+            Margin = new Thickness(0, SurfaceStyle.TightGap, 0, 0) };
         actions.Children.Add(snoozeButton);
         actions.Children.Add(skipButton);
-        var text = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        var text = new StackPanel { Spacing = SurfaceStyle.TightGap, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(title);
         text.Children.Add(detail);
         text.Children.Add(actions);
 
-        var block = new Grid { ColumnSpacing = 12, Margin = new Thickness(16, 10, 16, 10) };
+        var block = new Grid { ColumnSpacing = SurfaceStyle.ContentGap,
+            Margin = new Thickness(SurfaceStyle.SectionGap, SurfaceStyle.ControlGap, SurfaceStyle.SectionGap, SurfaceStyle.ControlGap) };
         block.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });
         block.ColumnDefinitions.Add(new ColumnDefinition());
         indicator = new Border { Background = SurfaceStyle.Brush(0x409D8D), CornerRadius = new CornerRadius(2) };
@@ -405,11 +408,7 @@ internal sealed class BreakWindow : Window
     private readonly Button end;
     private readonly Grid root;
     private readonly Border sceneHost;
-    private readonly SolidColorBrush skyText = SurfaceStyle.Brush(0xF4F8F2);
-    private readonly SolidColorBrush foreground = SurfaceStyle.Brush(0xF4F8F2);
-    private readonly SolidColorBrush subdued = SurfaceStyle.Brush(0xC7D8CE);
-    private readonly SolidColorBrush panelBackground = SurfaceStyle.Brush(0x182E34, 240);
-    private readonly SolidColorBrush panelStroke = SurfaceStyle.Brush(0xABC6BB, 100);
+    private readonly ScenePalette palette = new();
     private readonly SolidColorBrush laneBackground = SurfaceStyle.Brush(0xE4F0EB, 12);
     private readonly SolidColorBrush cardBackground = SurfaceStyle.Brush(0xE4F0EB, 22);
     private readonly SolidColorBrush cardStroke = SurfaceStyle.Brush(0, 0);
@@ -429,43 +428,31 @@ internal sealed class BreakWindow : Window
     internal BreakWindow(Action dismiss)
     {
         Title = "Afterbreak · Break preview";
-        clock = SurfaceStyle.Label("0:10", 84, FontWeights.Light);
-        clock.FontFamily = new FontFamily("Segoe UI Variable Display");
-        Typography.SetNumeralAlignment(clock, FontNumeralAlignment.Tabular);
+        clock = SurfaceStyle.Timer("0:10", 84);
         clock.HorizontalAlignment = HorizontalAlignment.Center;
-        clock.Foreground = skyText;
+        clock.Foreground = palette.Foreground;
         AutomationProperties.SetHelpText(clock, "Time remaining");
         AutomationProperties.SetLiveSetting(clock, AutomationLiveSetting.Off);
-        title = SurfaceStyle.Label("Time for a short break", 17);
+        title = SurfaceStyle.Label("Time for a short break", SurfaceStyle.StrongBody);
         title.HorizontalAlignment = HorizontalAlignment.Center;
-        title.Foreground = skyText;
+        title.Foreground = palette.Foreground;
         title.TextWrapping = TextWrapping.Wrap;
 
-        var taskLabel = SurfaceStyle.Label("When you're back", 13);
-        taskLabel.Foreground = subdued;
-        taskTitle = SurfaceStyle.Label("", 21, FontWeights.SemiBold);
-        taskTitle.Foreground = foreground;
+        var taskLabel = SurfaceStyle.Label("When you're back", SurfaceStyle.Caption);
+        taskLabel.Foreground = palette.Secondary;
+        taskTitle = SurfaceStyle.Label("", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
+        taskTitle.Foreground = palette.Foreground;
         taskTitle.TextWrapping = TextWrapping.Wrap;
-        taskNote = SurfaceStyle.Label("", 15);
-        taskNote.Foreground = subdued;
+        taskNote = SurfaceStyle.Label("", SurfaceStyle.Body);
+        taskNote.Foreground = palette.Secondary;
         taskNote.TextWrapping = TextWrapping.Wrap;
-        var taskBody = new StackPanel { Spacing = 5 };
+        var taskBody = new StackPanel { Spacing = SurfaceStyle.TightGap };
         taskBody.Children.Add(taskLabel);
         taskBody.Children.Add(taskTitle);
         taskBody.Children.Add(taskNote);
-        var taskCard = new Border
-        {
-            Background = panelBackground,
-            BorderBrush = panelStroke,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(18, 13, 18, 15),
-            Child = taskBody,
-        };
-
-        compactTask = BreakContent(taskCard);
-        boardHeading = SurfaceStyle.Label("", 18, FontWeights.SemiBold);
-        boardHeading.Foreground = foreground;
+        compactTask = BreakContent(palette.Card(taskBody));
+        boardHeading = SurfaceStyle.Label("", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
+        boardHeading.Foreground = palette.Foreground;
         boardHeading.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetHeadingLevel(boardHeading, AutomationHeadingLevel.Level1);
         boardView = BreakContent(CreateBoard());
@@ -475,11 +462,11 @@ internal sealed class BreakWindow : Window
         {
             Content = "End break",
             HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 15, 0, 0),
-            Padding = new Thickness(17, 7, 17, 7),
+            Margin = new Thickness(0, SurfaceStyle.SectionGap, 0, 0),
+            Padding = new Thickness(SurfaceStyle.SectionGap, SurfaceStyle.ControlGap, SurfaceStyle.SectionGap, SurfaceStyle.ControlGap),
         };
         end.Click += (_, _) => dismiss();
-        var heading = new StackPanel { Spacing = 4 };
+        var heading = new StackPanel { Spacing = SurfaceStyle.TightGap };
         heading.Children.Add(clock);
         heading.Children.Add(title);
 
@@ -488,8 +475,8 @@ internal sealed class BreakWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
             MaxWidth = 410,
-            Margin = new Thickness(20),
-            RowSpacing = 4,
+            Margin = new Thickness(SurfaceStyle.PageInset),
+            RowSpacing = SurfaceStyle.TightGap,
         };
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -502,7 +489,7 @@ internal sealed class BreakWindow : Window
         Grid.SetRow(end, 2);
         body.Children.Add(end);
 
-        root = new Grid { Background = SurfaceStyle.Brush(0x172A32) };
+        root = new Grid { Background = palette.Background };
         sceneHost = new Border { Child = StillBackdrop.Create(BreakScene.Dusk) };
         root.Children.Add(sceneHost);
         root.Children.Add(body);
@@ -591,6 +578,11 @@ internal sealed class BreakWindow : Window
             return false;
         }
         SurfaceWindow.ShowAndActivate(this);
+        if (!PlacementIsCurrent)
+        {
+            HideAndReturn(source);
+            return false;
+        }
         end.Focus(FocusState.Programmatic);
         StartSceneEntrance();
         return true;
@@ -623,7 +615,7 @@ internal sealed class BreakWindow : Window
         StopSceneEntrance();
         animateScene = state.AnimateScene;
         root.RequestedTheme = state.HighContrast ? ElementTheme.Default : ElementTheme.Dark;
-        root.Background = SurfaceStyle.Brush(state.HighContrast ? state.WindowColor : 0x172A32);
+        palette.Apply(state);
         sceneHost.Visibility = state.ShowScene ? Visibility.Visible : Visibility.Collapsed;
         if (scene != state.Scene)
         {
@@ -631,13 +623,6 @@ internal sealed class BreakWindow : Window
             sceneHost.Child = StillBackdrop.Create(scene);
         }
 
-        skyText.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.TextColor : 0xF4F8F2);
-        foreground.Color = skyText.Color;
-        subdued.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.TextColor : 0xC7D8CE);
-        panelBackground.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.WindowColor : 0x182E34,
-            state.UseMaterials ? (byte)240 : (byte)255);
-        panelStroke.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.TextColor : 0xABC6BB,
-            state.HighContrast ? (byte)255 : (byte)120);
         laneBackground.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.WindowColor : 0x23393D);
         cardBackground.Color = SurfaceStyle.ColorFromRgb(state.HighContrast ? state.WindowColor : 0x314A4E);
         cardStroke.Color = SurfaceStyle.ColorFromRgb(state.TextColor, state.HighContrast ? (byte)255 : (byte)0);
@@ -697,7 +682,7 @@ internal sealed class BreakWindow : Window
         VerticalScrollMode = ScrollMode.Enabled,
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         IsTabStop = true,
-        Margin = new Thickness(0, 19, 0, 0),
+        Margin = new Thickness(0, SurfaceStyle.SectionGap, 0, 0),
     };
 
     private Border CreateBoard()
@@ -708,7 +693,7 @@ internal sealed class BreakWindow : Window
             CreateLane(TaskStatus.InProgress, "In progress", 0xF2B462),
             CreateLane(TaskStatus.Done, "Done", 0x9ACBA7),
         };
-        var columns = new Grid { ColumnSpacing = 10 };
+        var columns = new Grid { ColumnSpacing = SurfaceStyle.ControlGap };
         boardColumns = columns;
         foreach (var lane in lanes)
         {
@@ -718,21 +703,13 @@ internal sealed class BreakWindow : Window
             columns.Children.Add(lane);
         }
 
-        var board = new StackPanel { Spacing = 12 };
+        var board = new StackPanel { Spacing = SurfaceStyle.ContentGap };
         board.Children.Add(boardHeading);
         board.Children.Add(columns);
 
         columns.SizeChanged += (_, _) => LayoutBoardColumns();
 
-        return new Border
-        {
-            Background = panelBackground,
-            BorderBrush = panelStroke,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(15),
-            Child = board,
-        };
+        return palette.Card(board);
     }
 
     private void PopulateSampleBoard()
@@ -753,8 +730,8 @@ internal sealed class BreakWindow : Window
         }
 
         stackBoard = stack;
-        columns.ColumnSpacing = stack ? 0 : 10;
-        columns.RowSpacing = stack ? 10 : 0;
+        columns.ColumnSpacing = stack ? 0 : SurfaceStyle.ControlGap;
+        columns.RowSpacing = stack ? SurfaceStyle.ControlGap : 0;
         for (var index = 0; index < columns.Children.Count; index++)
         {
             var lane = (FrameworkElement)columns.Children[index];
@@ -766,11 +743,11 @@ internal sealed class BreakWindow : Window
 
     private Border CreateLane(TaskStatus laneStatus, string name, uint statusColor)
     {
-        var label = SurfaceStyle.Label(name, 15, FontWeights.SemiBold);
-        label.Foreground = foreground;
+        var label = SurfaceStyle.Label(name, SurfaceStyle.StrongBody, FontWeights.SemiBold);
+        label.Foreground = palette.Foreground;
         label.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetHeadingLevel(label, AutomationHeadingLevel.Level2);
-        var header = new Grid { ColumnSpacing = 8 };
+        var header = new Grid { ColumnSpacing = SurfaceStyle.ControlGap };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition());
         var marker = SurfaceStyle.Brush(statusColor);
@@ -780,15 +757,15 @@ internal sealed class BreakWindow : Window
             Background = marker,
             Width = 7,
             Height = 7,
-            CornerRadius = new CornerRadius(4),
+            CornerRadius = SurfaceStyle.CardCorner,
             VerticalAlignment = VerticalAlignment.Center,
         });
         Grid.SetColumn(label, 1);
         header.Children.Add(label);
 
-        var lane = new StackPanel { Spacing = 8 };
+        var lane = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         lane.Children.Add(header);
-        var cards = new StackPanel { Spacing = 8 };
+        var cards = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         boardCards.Add(laneStatus, cards);
         lane.Children.Add(cards);
 
@@ -797,23 +774,23 @@ internal sealed class BreakWindow : Window
             Background = laneBackground,
             BorderBrush = cardStroke,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(7),
-            Padding = new Thickness(10),
+            CornerRadius = SurfaceStyle.PanelCorner,
+            Padding = new Thickness(SurfaceStyle.ControlGap),
             Child = lane,
         };
     }
 
     private Border CreateBoardCard(string taskTitle, string? nextStep = null)
     {
-        var task = SurfaceStyle.Label(taskTitle, 15);
-        task.Foreground = foreground;
+        var task = SurfaceStyle.Label(taskTitle, SurfaceStyle.Body);
+        task.Foreground = palette.Foreground;
         task.TextWrapping = TextWrapping.Wrap;
-        var card = new StackPanel { Spacing = 4 };
+        var card = new StackPanel { Spacing = SurfaceStyle.TightGap };
         card.Children.Add(task);
         if (!string.IsNullOrEmpty(nextStep))
         {
-            var note = SurfaceStyle.Label(nextStep, 13);
-            note.Foreground = subdued;
+            var note = SurfaceStyle.Label(nextStep, SurfaceStyle.Caption);
+            note.Foreground = palette.Secondary;
             note.TextWrapping = TextWrapping.Wrap;
             card.Children.Add(note);
         }
@@ -822,57 +799,9 @@ internal sealed class BreakWindow : Window
             Background = cardBackground,
             BorderBrush = cardStroke,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(5),
-            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = SurfaceStyle.CardCorner,
+            Padding = new Thickness(SurfaceStyle.ControlGap),
             Child = card,
         };
     }
-}
-
-internal static class SurfaceStyle
-{
-    internal static TextBlock Label(string text, double size, FontWeight? weight = null) => new()
-    {
-        Text = text,
-        FontSize = size,
-        FontWeight = weight ?? FontWeights.Normal,
-    };
-
-    internal static Color ColorFromRgb(uint rgb, byte opacity = 255) =>
-        Color.FromArgb(opacity, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
-
-    internal static SolidColorBrush Brush(uint rgb, byte opacity = 255) => new(ColorFromRgb(rgb, opacity));
-
-    internal static void ApplyContrast(TextBlock text, AppearanceState state)
-    {
-        if (state.HighContrast)
-        {
-            text.Foreground = Brush(state.TextColor);
-        }
-        else
-        {
-            text.ClearValue(TextBlock.ForegroundProperty);
-        }
-    }
-
-    internal static ScrollViewer Scroll(UIElement content) => new()
-    {
-        Content = content,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-    };
-
-    internal static TextBlock SecondaryLabel(string text, double size)
-    {
-        var label = Label(text, size);
-        label.Style = (Style)Application.Current.Resources["AfterbreakSecondaryLabelStyle"];
-        return label;
-    }
-
-    internal static Border Frame(UIElement child) => new()
-    {
-        Style = (Style)Application.Current.Resources["AfterbreakSurfaceFrameStyle"],
-        Child = child,
-    };
 }

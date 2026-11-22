@@ -9,10 +9,10 @@ namespace Afterbreak;
 internal sealed class CaptureSettingsPage : UserControl
 {
     private readonly TextBox chord = new() { Header = "Capture shortcut", MaxLength = 40 };
-    private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", 14);
+    private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Body);
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button openGuide = new() { Content = "Getting started" };
-    private readonly StackPanel guide = new() { Spacing = 10 };
+    private readonly StackPanel guide = new() { Spacing = SurfaceStyle.ContentGap };
     private readonly ComboBox breakDisplay = ReminderSettingsPage.CreateBreakDisplaySelector();
     private readonly InfoBar guideError = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button? guideBreaks;
@@ -24,8 +24,7 @@ internal sealed class CaptureSettingsPage : UserControl
         Func<BreakDisplay, string?> saveAndPreview, Action<ManagementPage>? navigate = null)
     {
         this.apply = apply;
-        var title = SurfaceStyle.Label("Capture", 27, FontWeights.SemiBold);
-        title.TextWrapping = TextWrapping.Wrap;
+        var title = SurfaceStyle.PageTitle("Capture");
         status.TextWrapping = TextWrapping.Wrap;
         var applyButton = new Button { Content = "Apply shortcut" };
         if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
@@ -40,7 +39,8 @@ internal sealed class CaptureSettingsPage : UserControl
             error.IsOpen = false;
         };
 
-        var guideTitle = SurfaceStyle.Label("Getting started", 19, FontWeights.SemiBold);
+        var guideTitle = SurfaceStyle.Label("Getting started", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
+        guideTitle.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetHeadingLevel(guideTitle, AutomationHeadingLevel.Level2);
         guide.Children.Add(guideTitle);
         guide.Children.Add(BodyText("Set your work and break durations in Breaks."));
@@ -96,7 +96,7 @@ internal sealed class CaptureSettingsPage : UserControl
         guide.Children.Add(dismiss);
         openGuide.Click += (_, _) => OpenGuide(focus: true);
 
-        var form = new StackPanel { Spacing = 12, Margin = new Thickness(20) };
+        var form = new StackPanel { Spacing = SurfaceStyle.ContentGap, Margin = new Thickness(SurfaceStyle.PageInset) };
         form.Children.Add(title);
         form.Children.Add(status);
         form.Children.Add(chord);
@@ -194,7 +194,7 @@ internal sealed class CaptureSettingsPage : UserControl
 
     private static TextBlock BodyText(string text)
     {
-        var block = SurfaceStyle.SecondaryLabel(text, 14);
+        var block = SurfaceStyle.SecondaryLabel(text, SurfaceStyle.Body);
         block.TextWrapping = TextWrapping.Wrap;
         return block;
     }

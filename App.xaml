@@ -19,12 +19,10 @@
             <Style x:Key="AfterbreakSecondaryLabelStyle" TargetType="TextBlock">
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
-            <Style x:Key="AfterbreakTaskPanelStyle" TargetType="Border">
+            <Style x:Key="AfterbreakPanelStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="Padding" Value="12" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

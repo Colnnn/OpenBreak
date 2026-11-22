@@ -5,6 +5,11 @@ namespace Afterbreak;
 
 internal static class Program
 {
+    private const string RemoveV8AppearanceColumns = """
+        ALTER TABLE appearance_preferences DROP COLUMN scene_motion;
+        ALTER TABLE appearance_preferences DROP COLUMN break_start_sound;
+        """;
+
     private static async Task Main()
     {
         var temporary = Directory.CreateTempSubdirectory("Afterbreak-storage-");
@@ -35,6 +40,8 @@ internal static class Program
             Console.WriteLine("PASS appearance policy for theme, contrast, transparency, motion and text scaling");
             CheckAppearanceMigration(temporary.FullName);
             Console.WriteLine("PASS appearance upgrade and rollback preserve task order, archive, shortcut, guide and reminder records");
+            CheckAppearanceV8(temporary.FullName);
+            Console.WriteLine("PASS v8 settings defaults, roundtrip, validation and atomic appearance writes");
             CheckWorkPauseMigration(temporary.FullName);
             Console.WriteLine("PASS version-five migration, durable work pause and rejection of invalid work-pause state");
             CheckRhythmMigration(temporary.FullName);
@@ -215,7 +222,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 7L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 8L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -287,7 +294,7 @@ internal static class Program
         Require(Scalar(blocked, "PRAGMA user_version") is 5L && File.ReadAllBytes(blocked).SequenceEqual(bytes),
             "An invalid version-five checkpoint leaves the old schema and file byte-identical.");
 
-        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 7L &&
+        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 8L &&
             Scalar(path, "SELECT work_paused FROM reminder_state") is 0L,
             "A legacy reminder defaults to work unpaused and keeps its presentation pause and cadence.");
         Require(Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")) &&
@@ -341,7 +348,7 @@ internal static class Program
         WriteLegacyRhythmSettings(path, version: 6);
         var tasks = TaskFingerprint(path);
         var checkpoint = Scalar(path, "SELECT checkpoint FROM reminder_state");
-        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 7L &&
+        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 8L &&
             store.LoadCapturePreferences() == new CapturePreferences(shortcut, true) && store.LoadAppearance() == appearance &&
             TaskFingerprint(path) == tasks && Equals(checkpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")),
             "v6 migration keeps all exact old durations, opted-in hours, settings, task order and paused snooze while adding defaults");
@@ -400,11 +407,27 @@ internal static class Program
             Require(File.ReadAllBytes(blocked).SequenceEqual(before) && Scalar(blocked, "PRAGMA user_version") is long actual &&
                 actual == version, "An ignored rhythm migration rolls back the version, settings and any prior work.");
         }
+
+        var rewritten = Path.Combine(folder, "rhythm-rewritten-v6.db");
+        File.Copy(path, rewritten);
+        WriteLegacyRhythmSettings(rewritten, 6);
+        ExecuteSql(rewritten, """
+            CREATE TRIGGER rewrite_rhythm AFTER UPDATE OF settings ON reminder_state
+            WHEN json_extract(NEW.settings, '$.WorkSeconds') <> 601
+            BEGIN
+                UPDATE reminder_state SET settings = json_set(settings, '$.WorkSeconds', 601) WHERE id = 1;
+            END;
+            """);
+        var original = File.ReadAllBytes(rewritten);
+        ExpectStorageError(() => new TaskStore(rewritten).LoadReminders());
+        Require(File.ReadAllBytes(rewritten).SequenceEqual(original) && Scalar(rewritten, "PRAGMA user_version") is 6L,
+            "A trigger that rewrites migrated rhythm rolls back the entire v8 migration.");
     }
 
     private static void WriteLegacyRhythmSettings(string path, int version) => ExecuteSql(path, $"""
         UPDATE reminder_state SET settings = json_remove(settings, '$.LongBreaks', '$.ShortsBeforeLong', '$.SnoozeSeconds');
         {(version == 5 ? "ALTER TABLE reminder_state DROP COLUMN work_paused;" : "")}
+        {RemoveV8AppearanceColumns}
         PRAGMA user_version = {version};
         """);
 
@@ -434,13 +457,13 @@ internal static class Program
                 store.SaveReminders(settings, checkpoint);
                 WriteLegacyReminderSettings(path, settings);
             }
-            ExecuteSql(path, "ALTER TABLE reminder_state DROP COLUMN work_paused; PRAGMA user_version = 4;");
+            ExecuteSql(path, $"{RemoveV8AppearanceColumns} ALTER TABLE reminder_state DROP COLUMN work_paused; PRAGMA user_version = 4;");
             var tasks = TaskFingerprint(path);
             var rawCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
             var migrated = store.LoadReminders();
             var reopened = new TaskStore(path);
-            Require(Scalar(path, "PRAGMA user_version") is 7L && migrated == reopened.LoadReminders() &&
+            Require(Scalar(path, "PRAGMA user_version") is 8L && migrated == reopened.LoadReminders() &&
                 migrated.Settings == (timerOnly.HasValue ? settings : ReminderSettings.Default) &&
                 migrated.Checkpoint == (timerOnly.HasValue ? checkpoint : null) &&
                 Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
@@ -461,7 +484,7 @@ internal static class Program
             TimeSpan.Zero, new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero));
         store.SaveReminders(settings, checkpoint);
         WriteLegacyReminderSettings(path, settings);
-        ExecuteSql(path, "ALTER TABLE reminder_state DROP COLUMN work_paused; PRAGMA user_version = 4;");
+        ExecuteSql(path, $"{RemoveV8AppearanceColumns} ALTER TABLE reminder_state DROP COLUMN work_paused; PRAGMA user_version = 4;");
         var cases = new[]
         {
             """UPDATE reminder_state SET settings = replace(settings, ',"TimerOnly":true', '');""",
@@ -537,7 +560,7 @@ internal static class Program
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 7L && TaskFingerprint(path) == fingerprint &&
+        Require(Scalar(path, "PRAGMA user_version") is 8L && TaskFingerprint(path) == fingerprint &&
             migrated.LoadReminders() == (reminders, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "Migration keeps tasks, the timer-only choice and the checkpoint.");
@@ -574,6 +597,10 @@ internal static class Program
             state.ScaleWidth(460) == 620 && state.ScaleHeight(165) == 380, "reduced motion and text scale do not override the scene or material");
         Require(!state.AllowsCaptureMotion(studyEnabled: true), "reduced motion overrides the capture study flag");
 
+        state = AppearancePolicy.Resolve(choices with { Motion = SceneMotion.Off }, system);
+        Require(state.ShowScene && !state.AnimateScene && !state.AllowsCaptureMotion(studyEnabled: false) &&
+            state.AllowsCaptureMotion(studyEnabled: true), "scene motion off retains scenery and leaves capture a separate opt-in study");
+
         state = AppearancePolicy.Resolve(choices, system with { Transparency = false });
         Require(!state.UseMaterials && state.ShowScene && state.AnimateScene, "transparency off leaves an opaque still scene with separately allowed entrance motion");
         foreach (var palette in new[] { (Window: 0x030615u, Text: 0xFCFFFFu), (Window: 0xFFFFD1u, Text: 0x083421u) })
@@ -609,7 +636,7 @@ internal static class Program
         var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
         var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
-        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 7L &&
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 8L &&
             store.LoadReminders() == (settings, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "v3 upgrade defaults to System/Dusk and maintains the reminder checkpoint");
@@ -632,6 +659,83 @@ internal static class Program
         Require(File.ReadAllBytes(blocked).SequenceEqual(bytes) && Scalar(blocked, "PRAGMA user_version") is 1L &&
             Scalar(blocked, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('capture_preferences', 'reminder_state')") is 0L,
             "a failed latest-schema upgrade rolls back intermediate preference DDL");
+    }
+
+    private static void CheckAppearanceV8(string folder)
+    {
+        var path = Path.Combine(folder, "appearance-v7.db");
+        CreateSchemaOne(path);
+        var store = new TaskStore(path);
+        var prior = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight);
+        var changed = new AppearancePreferences(AppearanceTheme.Light, BreakScene.Dusk, SceneMotion.Off, BreakStartSound: true);
+        store.SaveAppearance(prior);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 780, LongBreaks = false, SnoozeSeconds = 43 };
+        var paused = new ReminderCheckpoint(ReminderPhase.Work, TimeSpan.FromSeconds(315), 0, true, TimeSpan.Zero,
+            new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero)) with { WorkPaused = true };
+        store.SaveReminders(settings, paused);
+        Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid v7 capture fixture");
+        store.SaveCaptureShortcut(shortcut);
+        store.DismissCaptureGuide();
+        ExecuteSql(path, $"""
+            {RemoveV8AppearanceColumns}
+            PRAGMA user_version = 7;
+            CREATE TRIGGER reject_rhythm_rewrite BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(ABORT, 'Unexpected rewrite'); END;
+            """);
+        var tasks = TaskFingerprint(path);
+        var rhythm = Scalar(path, "SELECT settings || checkpoint || work_paused FROM reminder_state WHERE id = 1");
+
+        var blocked = Path.Combine(folder, "appearance-v7-conflict.db");
+        File.Copy(path, blocked);
+        ExecuteSql(blocked, "ALTER TABLE appearance_preferences ADD COLUMN break_start_sound INTEGER NOT NULL DEFAULT 0;");
+        Require(Scalar(blocked, "PRAGMA user_version") is 7L &&
+            Scalar(blocked, "SELECT COUNT(*) FROM pragma_table_info('appearance_preferences') WHERE name = 'break_start_sound'") is 1L,
+            "The v7 rollback fixture already contains a conflicting sound column.");
+        var original = File.ReadAllBytes(blocked);
+        ExpectStorageError(() => new TaskStore(blocked).LoadAppearance());
+        Require(File.ReadAllBytes(blocked).SequenceEqual(original) && Scalar(blocked, "PRAGMA user_version") is 7L &&
+            Scalar(blocked, "SELECT COUNT(*) FROM pragma_table_info('appearance_preferences') WHERE name = 'scene_motion'") is 0L,
+            "A failing second column addition rolls back the first and preserves the v7 file.");
+
+        Require(store.LoadAppearance() == prior && prior.Motion == SceneMotion.FollowWindows && !prior.BreakStartSound &&
+            Scalar(path, "PRAGMA user_version") is 8L && store.LoadReminders() == (settings, paused) &&
+            Equals(Scalar(path, "SELECT settings || checkpoint || work_paused FROM reminder_state WHERE id = 1"), rhythm) &&
+            TaskFingerprint(path) == tasks && store.LoadCapturePreferences() == new CapturePreferences(shortcut, true),
+            "A v7 upgrade adds safe defaults and preserves the stored scene, theme, tasks, capture and rhythm byte-for-byte.");
+        store.SaveAppearance(changed);
+        Require(new TaskStore(path).LoadAppearance() == changed && !(changed with { Motion = (SceneMotion)91 }).IsValid,
+            "New appearance preferences round-trip together and undefined motion values are rejected.");
+
+        foreach (var trigger in new[]
+        {
+            """
+            CREATE TRIGGER appearance_write BEFORE UPDATE ON appearance_preferences BEGIN
+                UPDATE tasks SET title = 'Unexpected trigger change';
+                SELECT RAISE(IGNORE);
+            END;
+            """,
+            """
+            CREATE TRIGGER appearance_write AFTER UPDATE OF break_start_sound ON appearance_preferences
+            WHEN NEW.break_start_sound = 0 BEGIN
+                UPDATE tasks SET title = 'Unexpected trigger change';
+                UPDATE appearance_preferences SET break_start_sound = 1 WHERE id = 1;
+            END;
+            """,
+        })
+        {
+            ExecuteSql(path, trigger);
+            var before = File.ReadAllBytes(path);
+            ExpectStorageError(() => store.SaveAppearance(prior));
+            Require(File.ReadAllBytes(path).SequenceEqual(before) && store.LoadAppearance() == changed,
+                "An ignored or rewritten appearance save rolls back the preference and trigger side effects.");
+            ExecuteSql(path, "DROP TRIGGER appearance_write;");
+        }
+
+        foreach (var invalid in new[] { "scene_motion = '0'", "break_start_sound = 2" })
+        {
+            ExecuteSql(path, $"PRAGMA ignore_check_constraints = ON; UPDATE appearance_preferences SET {invalid} WHERE id = 1;");
+            ExpectStorageError(() => store.LoadAppearance());
+            ExecuteSql(path, "UPDATE appearance_preferences SET scene_motion = 'Off', break_start_sound = 1 WHERE id = 1;");
+        }
     }
 
     private static object? Scalar(string path, string sql)

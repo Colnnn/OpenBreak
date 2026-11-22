@@ -66,7 +66,7 @@ public sealed partial class AfterbreakApp : Application
     {
         var dispatcher = DispatcherQueue.GetForCurrentThread();
         session = new AfterbreakSession(dispatcher, Quit, captureMotionStudy: captureMotionStudy,
-            diagnostics: diagnostics);
+            diagnostics: diagnostics, playBreakCue: BreakStartSound.Play);
         var queue = new LaunchRevealQueue(action => dispatcher.TryEnqueue(() => action()),
             session.RevealFromLaunch, shutdown.Token);
         Listener = LaunchPipe.ForCurrentSession().ListenAsync(queue.RequestAsync, shutdown.Token);

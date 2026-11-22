@@ -16,6 +16,8 @@ internal static class BreakDisplayChecks
         CheckInvalidSettings(Path.Combine(folder, "invalid-display.db"));
         CheckGuidePreview(Path.Combine(folder, "guide-preview.db"));
         CheckGuideDuringSchedule(Path.Combine(folder, "guide-schedule.db"));
+        CheckManualCue(Path.Combine(folder, "manual-break-cue.db"));
+        CheckScheduledCue(Path.Combine(folder, "scheduled-break-cue.db"));
     }
 
     private static void CheckManual(string path)
@@ -306,10 +308,111 @@ internal static class BreakDisplayChecks
         tray.Send(TrayCommand.Quit);
     }
 
-    private static (AfterbreakSession Session, DispatcherQueue Queue, Desktop Tray) Open(TaskStore store, TestClock clock)
+    private static void CheckManualCue(string path)
+    {
+        var store = new TaskStore(path);
+        store.SaveAppearance(AppearancePreferences.Default);
+        var cues = 0;
+        var (session, queue, tray) = Open(store, new TestClock(Start), () =>
+        {
+            Check(BreakWindow.Current.IsVisible && !WarningWindow.Current.IsVisible,
+                "the manual cue observes the committed visible break");
+            cues++;
+        });
+        tray.Send(TrayCommand.Preview);
+        ExpireWarning(session, queue);
+        Check(cues == 0 && BreakWindow.Current.IsVisible, "a visible manual preview is silent by default");
+        tray.Send(TrayCommand.EndBreak);
+
+        tray.Send(TrayCommand.Appearance);
+        var form = AppearanceSettingsPage.Current;
+        var optedIn = AppearancePreferences.Default with { BreakStartSound = true, Motion = SceneMotion.Off };
+        ExecuteSql(path, "CREATE TRIGGER ignore_sound BEFORE UPDATE ON appearance_preferences BEGIN SELECT RAISE(IGNORE); END;");
+        Check(!form.Save(optedIn) && WindowAppearance.Current.Preferences == AppearancePreferences.Default,
+            "an ignored cue opt-in leaves all live appearance preferences unchanged");
+        MainWindow.Current.Hide();
+        tray.Send(TrayCommand.Preview);
+        ExpireWarning(session, queue);
+        Check(cues == 0 && BreakWindow.Current.IsVisible, "the rejected cue opt-in keeps the next manual break silent");
+        tray.Send(TrayCommand.EndBreak);
+        ExecuteSql(path, "DROP TRIGGER ignore_sound;");
+        tray.Send(TrayCommand.Appearance);
+        Check(form.Save(optedIn) && cues == 0, "saving the sound preference never plays the cue");
+        tray.Send(TrayCommand.Quit);
+
+        (session, queue, tray) = Open(new TaskStore(path), new TestClock(Start), () =>
+        {
+            Check(BreakWindow.Current.IsVisible && !WarningWindow.Current.IsVisible && tray.DismissLabel == "End break",
+                "the cue is delivered after manual break state and tray actions are ready");
+            cues++;
+        });
+        Check(cues == 0, "loading an opted-in cue never plays it");
+        tray.Send(TrayCommand.Preview);
+        queue.Timer.Fire();
+        Check(cues == 0 && WarningWindow.Current.IsVisible, "manual warnings stay silent after opt-in");
+        tray.SystemPause = ReminderPause.Locked;
+        ExpireWarning(session, queue);
+        Check(cues == 0 && !BreakWindow.Current.IsVisible, "suppression during the manual warning prevents a cue");
+        tray.SystemPause = ReminderPause.None;
+
+        tray.Send(TrayCommand.Preview);
+        BreakWindow.Current.CanPlace = false;
+        ExpireWarning(session, queue);
+        Check(cues == 0 && !BreakWindow.Current.IsVisible, "failed manual break placement stays silent");
+        BreakWindow.Current.CanPlace = true;
+        tray.Send(TrayCommand.PreviewSampleBoard);
+        ExpireWarning(session, queue);
+        queue.Timer.Fire();
+        queue.Timer.Fire();
+        tray.Send(TrayCommand.EndBreak);
+        Check(cues == 1 && !BreakWindow.Current.IsVisible, "an opted-in manual break plays once at entry and never on ticks or dismissal");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckScheduledCue(string path)
+    {
+        var store = new TaskStore(path);
+        store.SaveAppearance(AppearancePreferences.Default with { BreakStartSound = true });
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5, ShortSeconds = 10 };
+        var clock = new TestClock(Start);
+        store.SaveReminders(settings, new ReminderScheduler(clock, settings).Checkpoint());
+        var cues = 0;
+        var (_, queue, tray) = Open(store, clock, () =>
+        {
+            Check(BreakWindow.Current.IsVisible && !WarningWindow.Current.IsVisible && Desktop.Current.DismissLabel == "End break",
+                "the cue is delivered after scheduled break state and tray actions are ready");
+            cues++;
+        });
+
+        void Tick(int seconds)
+        {
+            for (var index = 0; index < seconds; index++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                queue.Timers[1].Fire();
+            }
+        }
+
+        Tick(5);
+        Check(cues == 0 && WarningWindow.Current.IsVisible, "scheduled warnings stay silent after opt-in");
+        BreakWindow.Current.CanPlace = false;
+        Tick(10);
+        Check(cues == 0 && !BreakWindow.Current.IsVisible, "failed scheduled break placement stays silent");
+        BreakWindow.Current.CanPlace = true;
+        Tick(15);
+        Check(cues == 1 && BreakWindow.Current.IsVisible, "the next successfully placed scheduled break plays one cue");
+        Tick(4);
+        tray.Send(TrayCommand.TogglePause);
+        Tick(12);
+        Check(cues == 1 && !BreakWindow.Current.IsVisible, "scheduled ticks and presentation suppression stay silent");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static (AfterbreakSession Session, DispatcherQueue Queue, Desktop Tray) Open(TaskStore store, TestClock clock,
+        Action? playBreakCue = null)
     {
         var queue = new DispatcherQueue();
-        var session = new AfterbreakSession(queue, () => { }, store, clock);
+        var session = new AfterbreakSession(queue, () => { }, store, clock, playBreakCue: playBreakCue);
         return (session, queue, Desktop.Current);
     }
 

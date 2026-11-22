@@ -62,9 +62,7 @@ internal sealed class TasksPage : UserControl
     {
         this.store = store;
 
-        heading = SurfaceStyle.Label("Tasks", 30, FontWeights.SemiBold);
-        heading.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level1);
+        heading = SurfaceStyle.PageTitle("Tasks");
         addButton = new Button { Content = "Add task", VerticalAlignment = VerticalAlignment.Center };
         if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
         {
@@ -73,10 +71,10 @@ internal sealed class TasksPage : UserControl
         addButton.Click += (_, _) => OpenInlineEditor(focus: true);
         archiveButton = new Button { Content = "Archive", VerticalAlignment = VerticalAlignment.Center };
 
-        headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SurfaceStyle.ControlGap };
         headerActions.Children.Add(archiveButton);
         headerActions.Children.Add(addButton);
-        header = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
+        header = new Grid { ColumnSpacing = SurfaceStyle.ContentGap, RowSpacing = SurfaceStyle.ControlGap };
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -94,20 +92,20 @@ internal sealed class TasksPage : UserControl
         save.Click += (_, _) => SaveInlineDraft(focus: true);
         var cancel = new Button { Content = "Cancel" };
         cancel.Click += (_, _) => CancelInlineDraft(focus: true);
-        var editorHeading = SurfaceStyle.Label("New task", 18, FontWeights.SemiBold);
+        var editorHeading = SurfaceStyle.Label("New task", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
         AutomationProperties.SetHeadingLevel(editorHeading, AutomationHeadingLevel.Level2);
-        var editor = new StackPanel { Spacing = 8 };
+        var editor = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         editor.Children.Add(editorHeading);
         editor.Children.Add(draftTitle);
         editor.Children.Add(draftNextStep);
         editor.Children.Add(draftError);
-        var editorActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var editorActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SurfaceStyle.ControlGap };
         editorActions.Children.Add(save);
         editorActions.Children.Add(cancel);
         editor.Children.Add(editorActions);
         editorActions.SizeChanged += (_, args) => editorActions.Orientation = args.NewSize.Width < 220 * textScale
             ? Orientation.Vertical : Orientation.Horizontal;
-        inlineEditor = TaskPanel();
+        inlineEditor = SurfaceStyle.Panel();
         inlineEditor.Child = editor;
         inlineEditor.Visibility = Visibility.Collapsed;
         draftTitle.KeyDown += SaveOnEnter;
@@ -121,18 +119,18 @@ internal sealed class TasksPage : UserControl
             }
         };
 
-        columns = new Grid { ColumnSpacing = 12 };
+        columns = new Grid { ColumnSpacing = SurfaceStyle.ContentGap };
         for (var index = 0; index < Columns.Length; index++)
         {
             columns.ColumnDefinitions.Add(new ColumnDefinition());
             columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            lanes[index] = TaskPanel();
+            lanes[index] = SurfaceStyle.Panel();
             Grid.SetColumn(lanes[index], index);
             columns.Children.Add(lanes[index]);
         }
         columns.SizeChanged += (_, args) => LayoutLanes(args.NewSize.Width < 690 * textScale);
 
-        var board = new StackPanel { Spacing = 14 };
+        var board = new StackPanel { Spacing = SurfaceStyle.SectionGap };
         board.Children.Add(inlineEditor);
         board.Children.Add(columns);
         scroll = new ScrollViewer
@@ -143,7 +141,7 @@ internal sealed class TasksPage : UserControl
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
         archiveButton.Click += (_, _) => ShowArchive(!archived);
-        root = new Grid { Padding = new Thickness(20), RowSpacing = 14 };
+        root = new Grid { Padding = new Thickness(SurfaceStyle.PageInset), RowSpacing = SurfaceStyle.SectionGap };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition());
@@ -370,8 +368,8 @@ internal sealed class TasksPage : UserControl
         }
 
         lanesStacked = stack;
-        columns.ColumnSpacing = stack ? 0 : 12;
-        columns.RowSpacing = stack ? 12 : 0;
+        columns.ColumnSpacing = stack ? 0 : SurfaceStyle.ContentGap;
+        columns.RowSpacing = stack ? SurfaceStyle.ContentGap : 0;
         for (var index = 0; index < lanes.Length; index++)
         {
             Grid.SetColumn(lanes[index], stack ? 0 : index);
@@ -387,10 +385,10 @@ internal sealed class TasksPage : UserControl
         for (var column = 0; column < Columns.Length; column++)
         {
             var (status, label) = Columns[column];
-            var title = SurfaceStyle.Label(label, 18, FontWeights.SemiBold);
+            var title = SurfaceStyle.Label(label, SurfaceStyle.SectionTitle, FontWeights.SemiBold);
             title.TextWrapping = TextWrapping.Wrap;
             AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level2);
-            var lane = new StackPanel { Spacing = 10, MinHeight = 96, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            var lane = new StackPanel { Spacing = SurfaceStyle.ControlGap, MinHeight = 96, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
             lane.Children.Add(title);
             var columnTasks = tasks.Where(task => task.Status == status).ToArray();
             var cards = new List<(long Id, Border Element)>();
@@ -411,7 +409,7 @@ internal sealed class TasksPage : UserControl
                     (false, TaskStatus.InProgress) => "Move a task here when you start it.",
                     _ => "Move finished tasks here.",
                 };
-                var hint = SurfaceStyle.SecondaryLabel(empty, 14);
+                var hint = SurfaceStyle.SecondaryLabel(empty, SurfaceStyle.Body);
                 hint.TextWrapping = TextWrapping.Wrap;
                 lane.Children.Add(hint);
             }
@@ -426,9 +424,9 @@ internal sealed class TasksPage : UserControl
 
     private Border CreateCard(BoardTask task, bool canMoveUp, bool canMoveDown)
     {
-        var title = SurfaceStyle.Label(task.Title, 16, FontWeights.SemiBold);
+        var title = SurfaceStyle.Label(task.Title, SurfaceStyle.StrongBody, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
-        var body = new StackPanel { Spacing = 8 };
+        var body = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         if (archived)
         {
             body.Children.Add(title);
@@ -441,7 +439,7 @@ internal sealed class TasksPage : UserControl
             ToolTipService.SetToolTip(actions, "Task actions");
             taskActions.Add((task.Id, CardAction.Actions), actions);
 
-            var cardHeader = new Grid { ColumnSpacing = 8 };
+            var cardHeader = new Grid { ColumnSpacing = SurfaceStyle.ControlGap };
             cardHeader.ColumnDefinitions.Add(new ColumnDefinition());
             cardHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             cardHeader.Children.Add(title);
@@ -451,7 +449,7 @@ internal sealed class TasksPage : UserControl
         }
         if (task.NextStep is { } nextStep)
         {
-            var note = SurfaceStyle.SecondaryLabel(nextStep, 14);
+            var note = SurfaceStyle.SecondaryLabel(nextStep, SurfaceStyle.Body);
             note.TextWrapping = TextWrapping.Wrap;
             body.Children.Add(note);
         }
@@ -465,8 +463,8 @@ internal sealed class TasksPage : UserControl
             taskActions.Add((task.Id, CardAction.Restore), restore);
         }
 
-        var card = TaskPanel();
-        card.Child = body;
+        var card = SurfaceStyle.Panel(body);
+        card.CornerRadius = SurfaceStyle.CardCorner;
         if (!archived)
         {
             card.CanDrag = true;
@@ -620,7 +618,7 @@ internal sealed class TasksPage : UserControl
             MaxLength = TaskStore.NextStepLimit,
         };
         var feedback = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };
-        var form = new StackPanel { Spacing = 12 };
+        var form = new StackPanel { Spacing = SurfaceStyle.ContentGap };
         form.Children.Add(title);
         form.Children.Add(nextStep);
         form.Children.Add(feedback);
@@ -726,5 +724,4 @@ internal sealed class TasksPage : UserControl
         error.IsOpen = true;
     }
 
-    private static Border TaskPanel() => new() { Style = (Style)Application.Current.Resources["AfterbreakTaskPanelStyle"] };
 }

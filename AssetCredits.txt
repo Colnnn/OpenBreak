@@ -5,6 +5,10 @@ Daylight and Dusk are two color variants of an original coastal scene
 drawn in code for Afterbreak. StillBackdrop.cs renders the scene using
 WinUI shapes and gradients.
 
+Sound
+The optional break-start cue is an original two-note chime synthesized
+as PCM by BreakStartSound.cs. No recording or external sound asset is used.
+
 Windows resources
 The interface uses Windows system fonts, including Segoe UI Variable
 Display for the break timer. Afterbreak loads the shared Windows

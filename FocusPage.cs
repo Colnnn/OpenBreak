@@ -8,19 +8,19 @@ namespace Afterbreak;
 
 internal sealed class FocusPage : UserControl
 {
-    private readonly TextBlock phase = Label("", 21, heading: AutomationHeadingLevel.Level2);
-    private readonly TextBlock timer = Label("", 52);
-    private readonly TextBlock pauses = Secondary("", 14);
-    private readonly TextBlock nextBreak = Label("", 15);
-    private readonly TextBlock cadence = Secondary("", 14);
-    private readonly TextBlock task = Label("", 19);
-    private readonly TextBlock nextStep = Secondary("", 15);
+    private readonly TextBlock phase = Label("", SurfaceStyle.SectionTitle, heading: AutomationHeadingLevel.Level2);
+    private readonly TextBlock timer = SurfaceStyle.Timer("", 52);
+    private readonly TextBlock pauses = Secondary("", SurfaceStyle.Body);
+    private readonly TextBlock nextBreak = Label("", SurfaceStyle.Body);
+    private readonly TextBlock cadence = Secondary("", SurfaceStyle.Body);
+    private readonly TextBlock task = Label("", SurfaceStyle.SectionTitle);
+    private readonly TextBlock nextStep = Secondary("", SurfaceStyle.Body);
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Grid cards = new();
     private readonly Border timerCard;
     private readonly Border taskCard;
-    private readonly StackPanel workControls = new() { Spacing = 8 };
-    private readonly StackPanel breakControls = new() { Spacing = 8 };
+    private readonly StackPanel workControls = new() { Spacing = SurfaceStyle.ControlGap };
+    private readonly StackPanel breakControls = new() { Spacing = SurfaceStyle.ControlGap };
     private readonly Button startStop;
     private readonly Button pauseResume;
     private readonly Button snooze;
@@ -35,6 +35,7 @@ internal sealed class FocusPage : UserControl
 
     internal FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate, Action? openGuide = null)
     {
+        timer.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetLiveSetting(timer, AutomationLiveSetting.Off);
         startStop = ActionButton(() => startStopAction);
         if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
@@ -53,7 +54,7 @@ internal sealed class FocusPage : UserControl
         breakControls.Children.Add(Link("Break settings", ManagementPage.Breaks));
 
         timerCard = Card(phase, timer, pauses, nextBreak, cadence, workControls, breakControls);
-        taskCard = Card(Label("When you return", 16, AutomationHeadingLevel.Level2), task, nextStep,
+        taskCard = Card(Label("When you return", SurfaceStyle.StrongBody, AutomationHeadingLevel.Level2), task, nextStep,
             Link("Open task board", ManagementPage.Tasks));
         cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -65,8 +66,8 @@ internal sealed class FocusPage : UserControl
         timerCard.SizeChanged += (_, _) => LayoutControls();
         LayoutCards();
 
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(24), MaxWidth = 1100 };
-        body.Children.Add(Label("Focus", 30, AutomationHeadingLevel.Level1));
+        var body = new StackPanel { Spacing = SurfaceStyle.SectionGap, Margin = new Thickness(SurfaceStyle.PageInset), MaxWidth = 1100 };
+        body.Children.Add(SurfaceStyle.PageTitle("Focus"));
         body.Children.Add(error);
         if (openGuide is not null)
         {
@@ -168,8 +169,8 @@ internal sealed class FocusPage : UserControl
     private void LayoutCards()
     {
         var stack = cards.ActualWidth < 740 * textScale;
-        cards.ColumnSpacing = stack ? 0 : 16;
-        cards.RowSpacing = stack ? 16 : 0;
+        cards.ColumnSpacing = stack ? 0 : SurfaceStyle.SectionGap;
+        cards.RowSpacing = stack ? SurfaceStyle.SectionGap : 0;
         Grid.SetColumnSpan(timerCard, stack ? 2 : 1);
         Grid.SetColumnSpan(taskCard, stack ? 2 : 1);
         Grid.SetColumn(taskCard, stack ? 0 : 1);
@@ -187,18 +188,15 @@ internal sealed class FocusPage : UserControl
 
     private static Border Card(params UIElement[] children)
     {
-        var content = new StackPanel { Spacing = 8 };
+        var content = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         foreach (var child in children)
         {
             content.Children.Add(child);
         }
-        return new Border
-        {
-            Child = content,
-            Style = (Style)Application.Current.Resources["AfterbreakTaskPanelStyle"],
-            Padding = new Thickness(20),
-            VerticalAlignment = VerticalAlignment.Top,
-        };
+        var panel = SurfaceStyle.Panel(content);
+        panel.Padding = new Thickness(SurfaceStyle.PageInset);
+        panel.VerticalAlignment = VerticalAlignment.Top;
+        return panel;
     }
 
     private static TextBlock Label(string text, double size, AutomationHeadingLevel heading = AutomationHeadingLevel.None)

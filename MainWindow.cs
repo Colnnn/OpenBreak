@@ -171,6 +171,7 @@ internal sealed class MainWindow : Window
         FocusHome.ApplyAppearance(state);
         Tasks.ApplyAppearance(state, theme);
         Breaks.ApplyAppearance(state);
+        Appearance.ApplyAppearance(state);
     }
 
     internal FocusBookmark? GetFocusBookmark()

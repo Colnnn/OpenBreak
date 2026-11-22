@@ -24,9 +24,9 @@ internal sealed class ReminderSettingsPage : UserControl
     private readonly Grid firstDurations = PairGrid();
     private readonly Grid secondDurations = PairGrid();
     private readonly Grid times = PairGrid();
-    private readonly StackPanel actions = new() { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+    private readonly StackPanel actions = new() { Spacing = SurfaceStyle.ControlGap, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = false };
-    private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", 14);
+    private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Body);
     private readonly Func<ReminderSettings, bool> save;
     private ReminderSettings saved = ReminderSettings.Default;
     private bool loadError;
@@ -35,10 +35,10 @@ internal sealed class ReminderSettingsPage : UserControl
     internal ReminderSettingsPage(Func<ReminderSettings, bool> save)
     {
         this.save = save;
-        var title = Heading("Breaks", 27, AutomationHeadingLevel.Level1);
-        var rhythmHint = SurfaceStyle.SecondaryLabel("Only completed short breaks count. Turning long breaks off clears the count.", 13);
+        var title = SurfaceStyle.PageTitle("Breaks");
+        var rhythmHint = SurfaceStyle.SecondaryLabel("Only completed short breaks count. Turning long breaks off clears the count.", SurfaceStyle.Body);
         rhythmHint.TextWrapping = TextWrapping.Wrap;
-        var privacy = SurfaceStyle.SecondaryLabel("Pause for presentation from the tray whenever you share your screen.", 13);
+        var privacy = SurfaceStyle.SecondaryLabel("Pause for presentation from the tray whenever you share your screen.", SurfaceStyle.Body);
         privacy.TextWrapping = TextWrapping.Wrap;
         status.TextWrapping = TextWrapping.Wrap;
         AddPair(firstDurations, work, shortBreak, 560);
@@ -56,18 +56,18 @@ internal sealed class ReminderSettingsPage : UserControl
         var discard = new Button { Content = "Discard changes", HorizontalAlignment = HorizontalAlignment.Right };
         discard.Click += (_, _) => SetForm(saved, loadError);
 
-        var form = new StackPanel { Spacing = 14, Margin = new Thickness(20) };
+        var form = new StackPanel { Spacing = SurfaceStyle.SectionGap, Margin = new Thickness(SurfaceStyle.PageInset) };
         form.Children.Add(title);
         form.Children.Add(status);
         form.Children.Add(enabled);
-        form.Children.Add(Heading("Work and rest", 18));
+        form.Children.Add(Heading("Work and rest", SurfaceStyle.SectionTitle));
         form.Children.Add(firstDurations);
         form.Children.Add(longBreaks);
         form.Children.Add(secondDurations);
         form.Children.Add(rhythmHint);
         form.Children.Add(hours);
         form.Children.Add(times);
-        form.Children.Add(Heading("During a break", 18));
+        form.Children.Add(Heading("During a break", SurfaceStyle.SectionTitle));
         form.Children.Add(breakDisplay);
         form.Children.Add(snooze);
         form.Children.Add(privacy);
@@ -76,7 +76,8 @@ internal sealed class ReminderSettingsPage : UserControl
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.Children.Add(SurfaceStyle.Scroll(form));
-        var footer = new StackPanel { Spacing = 8, Margin = new Thickness(20, 8, 20, 12) };
+        var footer = new StackPanel { Spacing = SurfaceStyle.ControlGap,
+            Margin = new Thickness(SurfaceStyle.PageInset, SurfaceStyle.ControlGap, SurfaceStyle.PageInset, SurfaceStyle.ContentGap) };
         actions.Children.Add(saveButton);
         actions.Children.Add(discard);
         footer.Children.Add(error);
@@ -142,7 +143,7 @@ internal sealed class ReminderSettingsPage : UserControl
 
     private static Grid PairGrid()
     {
-        var pair = new Grid { ColumnSpacing = 12 };
+        var pair = new Grid { ColumnSpacing = SurfaceStyle.ContentGap };
         pair.ColumnDefinitions.Add(new ColumnDefinition());
         pair.ColumnDefinitions.Add(new ColumnDefinition());
         pair.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -153,7 +154,7 @@ internal sealed class ReminderSettingsPage : UserControl
     private static void LayoutPair(Grid pair, FrameworkElement first, FrameworkElement second, double minimumWidth, double scale)
     {
         var stack = pair.ActualWidth < minimumWidth * scale;
-        pair.RowSpacing = stack ? 8 : 0;
+        pair.RowSpacing = stack ? SurfaceStyle.ControlGap : 0;
         Grid.SetColumnSpan(first, stack ? 2 : 1);
         Grid.SetColumn(second, stack ? 0 : 1);
         Grid.SetColumnSpan(second, stack ? 2 : 1);
@@ -266,7 +267,7 @@ internal sealed class ReminderSettingsPage : UserControl
         error.IsOpen = true;
     }
 
-    private static TextBlock Heading(string text, int size, AutomationHeadingLevel level = AutomationHeadingLevel.Level2)
+    private static TextBlock Heading(string text, double size, AutomationHeadingLevel level = AutomationHeadingLevel.Level2)
     {
         var heading = SurfaceStyle.Label(text, size, FontWeights.SemiBold);
         heading.TextWrapping = TextWrapping.Wrap;
@@ -278,7 +279,7 @@ internal sealed class ReminderSettingsPage : UserControl
     {
         var field = new TextBox
         {
-            Header = SurfaceStyle.Label(header, 14),
+            Header = SurfaceStyle.Label(header, SurfaceStyle.Body),
             InputScope = new InputScope { Names = { new InputScopeName(InputScopeNameValue.Number) } },
         };
         ((TextBlock)field.Header).TextWrapping = TextWrapping.Wrap;
@@ -299,8 +300,8 @@ internal sealed class ReminderSettingsPage : UserControl
             this.maximumMinutes = maximumMinutes;
             minutes = NumberField("Minutes", $"{label}, minutes");
             seconds = NumberField("Seconds", $"{label}, seconds");
-            Spacing = 4;
-            Children.Add(Heading(label, 15, AutomationHeadingLevel.Level3));
+            Spacing = SurfaceStyle.TightGap;
+            Children.Add(Heading(label, SurfaceStyle.StrongBody, AutomationHeadingLevel.Level3));
             fields.Children.Add(minutes);
             fields.Children.Add(seconds);
             fields.SizeChanged += (_, _) => Layout();

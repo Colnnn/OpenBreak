@@ -12,7 +12,7 @@ internal sealed class TrayFlyoutWindow : Window
         internal TrayMenuItem Item { get; set; }
     }
 
-    private readonly StackPanel body = new() { Margin = new Thickness(8), Spacing = 2 };
+    private readonly StackPanel body = new() { Margin = new Thickness(SurfaceStyle.ControlGap), Spacing = 2 };
     private readonly TextBlock status;
     private readonly ScrollViewer scroll;
     private readonly Dictionary<TrayCommand, ActionRow> rows = [];
@@ -31,9 +31,9 @@ internal sealed class TrayFlyoutWindow : Window
     internal TrayFlyoutWindow()
     {
         Title = "Afterbreak";
-        status = SurfaceStyle.SecondaryLabel("", 13);
+        status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Caption);
         status.TextWrapping = TextWrapping.Wrap;
-        status.Margin = new Thickness(8, 4, 8, 4);
+        status.Margin = RowInsets();
         scroll = SurfaceStyle.Scroll(body);
         var frame = SurfaceStyle.Frame(scroll);
         frame.TabFocusNavigation = KeyboardNavigationMode.Cycle;
@@ -94,14 +94,15 @@ internal sealed class TrayFlyoutWindow : Window
                 body.Children.Add(new MenuFlyoutSeparator());
             }
 
-            var label = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var label = SurfaceStyle.Label("", SurfaceStyle.Body);
+            label.TextWrapping = TextWrapping.Wrap;
             var button = new Button
             {
                 Content = label,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
                 MinHeight = 36,
-                Padding = new Thickness(8, 4, 8, 4),
+                Padding = RowInsets(),
             };
             if (Application.Current.Resources.TryGetValue("SubtleButtonStyle", out var subtle) && subtle is Style style)
             {
@@ -121,6 +122,9 @@ internal sealed class TrayFlyoutWindow : Window
         SetMenuState(state);
         scroll.ChangeView(null, 0, null, disableAnimation: true);
     }
+
+    private static Thickness RowInsets() =>
+        new(SurfaceStyle.ControlGap, SurfaceStyle.TightGap, SurfaceStyle.ControlGap, SurfaceStyle.TightGap);
 
     internal void UpdateMenu(TrayMenuState state)
     {

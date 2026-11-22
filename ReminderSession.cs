@@ -187,6 +187,10 @@ internal sealed partial class AfterbreakSession
             }
             reminders.StartVisibleCountdown();
             TraceBreakShown(reminders.Remaining);
+            if (intended == Surface.Preview)
+            {
+                PlayBreakStartCue();
+            }
         }
 
         var seconds = Math.Max(1, (int)Math.Ceiling(reminders.Remaining.TotalSeconds));

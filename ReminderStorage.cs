@@ -149,7 +149,7 @@ internal sealed partial class TaskStore
 
         using var update = Command(connection, transaction, "UPDATE reminder_state SET settings = $settings WHERE id = 1",
             ("$settings", JsonSerializer.Serialize(settings, ReminderJson)));
-        if (update.ExecuteNonQuery() != 1)
+        if (update.ExecuteNonQuery() != 1 || ReadReminders(connection, transaction) != (settings, checkpoint))
         {
             throw new InvalidDataException("The saved reminder settings could not be migrated.");
         }

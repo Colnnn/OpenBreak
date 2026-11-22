@@ -11,11 +11,15 @@ internal sealed class CaptureSettingsWindow : Window
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button openGuide = new() { Content = "Getting started" };
     private readonly StackPanel guide = new() { Spacing = 10 };
+    private readonly ComboBox breakDisplay = SettingsWindow.CreateBreakDisplaySelector();
+    private readonly InfoBar guideError = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Func<CaptureShortcut, string?> apply;
     private bool placed;
     private bool quitting;
+    private bool hiddenForPreview;
 
-    internal CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide)
+    internal CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
+        Func<BreakDisplay, string?> saveAndPreview)
     {
         this.apply = apply;
         Title = "Afterbreak · Capture settings";
@@ -35,6 +39,23 @@ internal sealed class CaptureSettingsWindow : Window
         guide.Children.Add(BodyText("Press your capture shortcut or choose Capture task from the tray. Enter saves and Escape cancels."));
         guide.Children.Add(BodyText("Choose Open Tasks from the tray to edit and move your tasks. Scheduled breaks start off. Turn them on in Reminder settings."));
         guide.Children.Add(BodyText("Closing a window keeps Afterbreak in the tray. Choose Quit Afterbreak there to stop the app."));
+        guide.Children.Add(breakDisplay);
+        guide.Children.Add(BodyText("A 10-second warning comes before the 10-second preview."));
+        var preview = new Button { Content = "Save and preview" };
+        preview.Click += (_, _) =>
+        {
+            if (saveAndPreview((BreakDisplay)breakDisplay.SelectedIndex) is { } failure)
+            {
+                guideError.Message = failure;
+                guideError.IsOpen = true;
+            }
+            else
+            {
+                guideError.IsOpen = false;
+            }
+        };
+        guide.Children.Add(preview);
+        guide.Children.Add(guideError);
         var dismiss = new Button { Content = "Got it" };
         dismiss.Click += (_, _) =>
         {
@@ -53,7 +74,7 @@ internal sealed class CaptureSettingsWindow : Window
         openGuide.Click += (_, _) =>
         {
             ShowGuide(true);
-            dismiss.Focus(FocusState.Programmatic);
+            breakDisplay.Focus(FocusState.Programmatic);
         };
 
         var form = new StackPanel { Spacing = 12, Margin = new Thickness(20) };
@@ -77,19 +98,32 @@ internal sealed class CaptureSettingsWindow : Window
     }
 
     internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+    internal nint PreviewSource { get; private set; }
+    internal bool GuideHasForeground => !quitting && AppWindow.IsVisible && guide.Visibility == Visibility.Visible &&
+        Desktop.IsForeground(Handle);
 
-    internal void Show(nint source, CapturePreferences preferences, string description)
+    internal void Show(nint source, CapturePreferences preferences, string description, BreakDisplay display)
     {
         var opening = !AppWindow.IsVisible;
-        if (opening)
-        {
-            SetPreferences(preferences, description);
-        }
-
-        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 510, 620, placed))
+        if (!SurfaceWindow.TryPlaceOrRecover(this, source, 510, 720, placed))
         {
             return;
         }
+        if (opening)
+        {
+            if (hiddenForPreview)
+            {
+                breakDisplay.SelectedIndex = (int)display;
+                SetStatus(description);
+                hiddenForPreview = false;
+            }
+            else
+            {
+                SetPreferences(preferences, description, display);
+            }
+            PreviewSource = source == Handle ? 0 : source;
+        }
+
         placed = true;
         Activate();
         if (!AppWindow.IsVisible)
@@ -103,15 +137,27 @@ internal sealed class CaptureSettingsWindow : Window
         }
     }
 
-    internal void SetPreferences(CapturePreferences preferences, string description)
+    internal void SetPreferences(CapturePreferences preferences, string description, BreakDisplay display)
     {
         chord.Text = preferences.Shortcut.ToString();
         error.IsOpen = false;
+        guideError.IsOpen = false;
+        breakDisplay.SelectedIndex = (int)display;
         SetStatus(description);
         ShowGuide(!preferences.GuideDismissed);
     }
 
     internal void SetStatus(string description) => status.Text = description;
+
+    internal void HideForPreview()
+    {
+        hiddenForPreview = true;
+        if (GuideHasForeground)
+        {
+            Desktop.ReturnTo(PreviewSource);
+        }
+        AppWindow.Hide();
+    }
 
     internal void CloseForQuit()
     {

@@ -8,7 +8,7 @@ internal sealed class SettingsWindow : Window
 {
     private readonly ToggleSwitch enabled = new() { Header = "Scheduled reminders" };
     private readonly ToggleSwitch hours = new() { Header = "Limit reminders to working hours" };
-    private readonly ComboBox breakDisplay = new() { Header = "Break display", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox breakDisplay = CreateBreakDisplaySelector();
     private readonly NumberBox work = Duration("Work interval (seconds)", 5, 86400);
     private readonly NumberBox shortBreak = Duration("Short break (seconds)", 1, 3600);
     private readonly NumberBox longBreak = Duration("Long break (seconds)", 1, 3600);
@@ -26,9 +26,6 @@ internal sealed class SettingsWindow : Window
     {
         this.save = save;
         Title = "Afterbreak · Reminder settings";
-        breakDisplay.Items.Add("Saved task board (default)");
-        breakDisplay.Items.Add("One task");
-        breakDisplay.Items.Add("Timer only");
 
         var title = SurfaceStyle.Label("Reminder settings", 27, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
@@ -77,6 +74,15 @@ internal sealed class SettingsWindow : Window
                 AppWindow.Hide();
             }
         };
+    }
+
+    internal static ComboBox CreateBreakDisplaySelector()
+    {
+        var selector = new ComboBox { Header = "Break display", HorizontalAlignment = HorizontalAlignment.Stretch };
+        selector.Items.Add("Saved task board (default)");
+        selector.Items.Add("One task");
+        selector.Items.Add("Timer only");
+        return selector;
     }
 
     internal nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);

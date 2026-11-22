@@ -31,7 +31,13 @@ internal sealed partial class TaskStore
     internal (ReminderSettings Settings, ReminderCheckpoint? Checkpoint) LoadReminders()
     {
         using var connection = Open();
-        using var query = Command(connection, null, "SELECT settings, checkpoint FROM reminder_state WHERE id = 1");
+        return ReadReminders(connection, null);
+    }
+
+    private static (ReminderSettings Settings, ReminderCheckpoint? Checkpoint) ReadReminders(
+        SqliteConnection connection, SqliteTransaction? transaction)
+    {
+        using var query = Command(connection, transaction, "SELECT settings, checkpoint FROM reminder_state WHERE id = 1");
         using var reader = query.ExecuteReader();
         if (!reader.Read())
         {
@@ -42,6 +48,34 @@ internal sealed partial class TaskStore
         var checkpoint = ReadReminderJson<ReminderCheckpoint>(reader.GetString(1));
         ValidateReminderState(settings, checkpoint);
         return (settings, checkpoint);
+    }
+
+    internal void SaveBreakDisplay(BreakDisplay display, ReminderSettings current, ReminderCheckpoint initialCheckpoint)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var (saved, checkpoint) = ReadReminders(connection, transaction);
+        var settings = saved with { BreakDisplay = display };
+        var activeSettings = current with { BreakDisplay = display };
+        var activeCheckpoint = checkpoint ?? initialCheckpoint;
+        ValidateReminderState(settings, activeCheckpoint);
+        if (settings != activeSettings || activeCheckpoint.ManuallyPaused)
+        {
+            throw new InvalidDataException("The saved reminder state is unavailable for a preview.");
+        }
+
+        var settingsJson = JsonSerializer.Serialize(settings, ReminderJson);
+        using var save = checkpoint is null
+            ? Command(connection, transaction,
+                "INSERT INTO reminder_state (id, settings, checkpoint) VALUES (1, $settings, $checkpoint)",
+                ("$settings", settingsJson), ("$checkpoint", JsonSerializer.Serialize(initialCheckpoint, ReminderJson)))
+            : Command(connection, transaction, "UPDATE reminder_state SET settings = $settings WHERE id = 1",
+                ("$settings", settingsJson));
+        if (save.ExecuteNonQuery() != 1)
+        {
+            throw new InvalidDataException("The break display could not be saved.");
+        }
+        transaction.Commit();
     }
 
     private static T ReadReminderJson<T>(string json) where T : class

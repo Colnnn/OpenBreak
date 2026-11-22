@@ -318,6 +318,16 @@ internal sealed class WarningWindow : Window
 
     internal bool TryShow(nint source, string? breakKind = null)
     {
+        if (!TryPrepare(source, breakKind))
+        {
+            return false;
+        }
+        ShowPrepared();
+        return true;
+    }
+
+    internal bool TryPrepare(nint source, string? breakKind = null)
+    {
         var scheduled = breakKind is not null;
         if (!SurfaceWindow.TryPlace(this, source, windowWidth, scheduled ? scheduledHeight : previewHeight,
             out placement, atCorner: true))
@@ -327,9 +337,10 @@ internal sealed class WarningWindow : Window
         actions.Visibility = scheduled ? Visibility.Visible : Visibility.Collapsed;
         detail.Text = breakKind ?? "Your 10-second preview is about to begin.";
         Update(10);
-        AppWindow.Show(activateWindow: false);
         return true;
     }
+
+    internal void ShowPrepared() => AppWindow.Show(activateWindow: false);
 
     internal bool PlacementIsCurrent => SurfaceWindow.IsCurrent(this, placement);
 

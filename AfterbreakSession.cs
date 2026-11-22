@@ -96,11 +96,11 @@ internal sealed partial class AfterbreakSession
                 }
                 if (captureSettings is null)
                 {
-                    captureSettings = new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide);
+                    captureSettings = new CaptureSettingsWindow(ApplyCaptureShortcut, captureOptions.DismissGuide, SaveAndPreviewGuide);
                     appearance.Track(captureSettings, SurfaceMaterial.Mica);
                 }
                 desktop.CaptureSettingsHandle = captureSettings.Handle;
-                captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status);
+                captureSettings.Show(source, captureOptions.Preferences, captureOptions.Status, reminders.Settings.BreakDisplay);
                 break;
             case TrayCommand.Settings:
                 DismissBreakForSettings(preserveSchedule: true);
@@ -178,16 +178,11 @@ internal sealed partial class AfterbreakSession
                 }
 
                 Dismiss();
-                samplePreview = command == TrayCommand.PreviewSampleBoard;
                 if (!warning.TryShow(source))
                 {
                     return;
                 }
-                returnWindow = source;
-                visible = Surface.Warning;
-                desktop.PreviewAvailable = false;
-                desktop.DismissLabel = "Cancel preview";
-                StartClock();
+                BeginManualPreview(source, sample: command == TrayCommand.PreviewSampleBoard);
                 break;
             case TrayCommand.EndBreak:
                 EndVisibleBreak();
@@ -211,6 +206,71 @@ internal sealed partial class AfterbreakSession
                 exit();
                 break;
         }
+    }
+
+    private string? SaveAndPreviewGuide(BreakDisplay display)
+    {
+        if (captureSettings is not { GuideHasForeground: true } guide || visible != Surface.None)
+        {
+            return "Finish the current capture or preview before starting another preview.";
+        }
+        if (reminderSettings?.AppWindow.IsVisible == true)
+        {
+            return "Close Reminder settings before saving here.";
+        }
+        if (!Enum.IsDefined(display))
+        {
+            return "Choose a break display.";
+        }
+        if (reminderLoadError)
+        {
+            return "Saved reminder settings are unavailable. Retry in Reminder settings.";
+        }
+        if (!ManualPreviewAllowed(checkPresentation: true))
+        {
+            return "A preview is unavailable while breaks are paused or the display is unavailable.";
+        }
+        var source = guide.PreviewSource;
+        if (!warning.TryPrepare(source))
+        {
+            return "The preview warning couldn’t be positioned. Try again.";
+        }
+
+        try
+        {
+            tasks.SaveBreakDisplay(display, reminders.Settings, reminders.Checkpoint());
+        }
+        catch (Exception exception) when (TaskStore.IsStorageError(exception))
+        {
+            return "Couldn’t save the break display. Try again.";
+        }
+
+        reminders = reminders.WithSettings(reminders.Settings with { BreakDisplay = display });
+        if (!ManualPreviewAllowed(checkPresentation: true) || !guide.GuideHasForeground ||
+            !warning.PlacementIsCurrent)
+        {
+            return "Break display saved. The preview is unavailable right now. Try again.";
+        }
+
+        warning.ShowPrepared();
+        if (!warning.AppWindow.IsVisible || !warning.PlacementIsCurrent || !guide.GuideHasForeground)
+        {
+            warning.AppWindow.Hide();
+            return "Break display saved. The warning couldn’t open. Try again.";
+        }
+        BeginManualPreview(source, sample: false);
+        guide.HideForPreview();
+        return null;
+    }
+
+    private void BeginManualPreview(nint source, bool sample)
+    {
+        samplePreview = sample;
+        returnWindow = source;
+        visible = Surface.Warning;
+        desktop.PreviewAvailable = false;
+        desktop.DismissLabel = "Cancel preview";
+        StartClock();
     }
 
     private void LoadAppearance()

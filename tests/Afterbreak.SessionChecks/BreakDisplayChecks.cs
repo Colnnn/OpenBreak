@@ -14,6 +14,8 @@ internal static class BreakDisplayChecks
         CheckManual(Path.Combine(folder, "manual-break-views.db"));
         CheckScheduled(Path.Combine(folder, "scheduled-break-views.db"));
         CheckInvalidSettings(Path.Combine(folder, "invalid-display.db"));
+        CheckGuidePreview(Path.Combine(folder, "guide-preview.db"));
+        CheckGuideDuringSchedule(Path.Combine(folder, "guide-schedule.db"));
     }
 
     private static void CheckManual(string path)
@@ -158,6 +160,144 @@ internal static class BreakDisplayChecks
         tray.Send(TrayCommand.Settings);
         Check(!SettingsWindow.Current.Save(ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly }) &&
             File.ReadAllBytes(path).SequenceEqual(before), "a corrupt display setting cannot be replaced by saving fallback settings");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckGuidePreview(string path)
+    {
+        var store = new TaskStore(path);
+        store.Add("Private task", "Private note");
+        var tasks = store.List(archived: false);
+        var (session, queue, tray) = Open(store, new TestClock(Start));
+        tray.Send(TrayCommand.CaptureSettings, 101);
+        var guide = CaptureSettingsWindow.Current;
+        Check(guide.Display == BreakDisplay.SavedTaskBoard && store.LoadReminders().Checkpoint is null,
+            "first Getting started shows the default break display without writing settings");
+
+        tray.Send(TrayCommand.CaptureSettings, 102);
+        WarningWindow.Current.CanPlace = false;
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+            store.LoadReminders().Checkpoint is null && !WarningWindow.Current.IsVisible,
+            "guide warning placement failure keeps the guide and leaves the choice unsaved");
+        WarningWindow.Current.CanPlace = true;
+
+        tray.SystemPause = ReminderPause.Locked;
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && store.LoadReminders().Checkpoint is null,
+            "a locked session blocks guide saving and preview");
+        tray.SystemPause = ReminderPause.None;
+
+        tray.Send(TrayCommand.Settings);
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && store.LoadReminders().Checkpoint is null,
+            "the guide cannot overwrite a choice while Reminder settings has an open draft");
+        SettingsWindow.Current.Hide();
+
+        tray.Send(TrayCommand.Capture);
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && CaptureWindow.Current.IsVisible,
+            "guide preview cannot close an active capture");
+        CaptureWindow.Current.Cancel();
+        tray.Send(TrayCommand.Preview);
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && WarningWindow.Current.IsVisible &&
+            store.LoadReminders().Checkpoint is null, "guide preview cannot replace a current preview");
+        tray.Send(TrayCommand.EndBreak);
+
+        ExecuteSql(path, """
+            CREATE TRIGGER ignore_guide_insert BEFORE INSERT ON reminder_state BEGIN SELECT RAISE(IGNORE); END;
+            """);
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+            !WarningWindow.Current.IsVisible && store.LoadReminders().Checkpoint is null,
+            "a suppressed first guide write reports failure and starts no warning");
+        ExecuteSql(path, "DROP TRIGGER ignore_guide_insert;");
+
+        var pauseChecks = 0;
+        tray.CheckSystemPause = () =>
+        {
+            if (++pauseChecks == 2)
+            {
+                guide.Foreground = false;
+            }
+            return ReminderPause.None;
+        };
+        var returns = SurfaceWindow.Returns;
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+            !WarningWindow.Current.IsVisible && SurfaceWindow.Returns == returns &&
+            store.LoadReminders().Settings == ReminderSettings.Default with { BreakDisplay = BreakDisplay.TimerOnly },
+            "loss of guide foreground after saving keeps the draft and never restores or previews");
+        tray.CheckSystemPause = null;
+        guide.Foreground = true;
+
+        WarningWindow.Current.CanShowPrepared = false;
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible &&
+            !WarningWindow.Current.IsVisible && SurfaceWindow.Returns == returns && tray.PreviewAvailable,
+            "a warning that fails to open leaves the guide available for retry");
+        WarningWindow.Current.CanShowPrepared = true;
+
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is null && !guide.IsVisible &&
+            WarningWindow.Current.IsVisible && WarningWindow.Seconds == 10 && WarningWindow.Current.LastSource == 101 &&
+            SurfaceWindow.Returned == 101 && SurfaceWindow.Returns == returns + 1 && tray.DismissLabel == "Cancel preview",
+            "guide success starts the normal warning and returns to the original opening source");
+        var shows = WarningWindow.Shows;
+        Check(guide.SaveAndPreview(BreakDisplay.OneTask) is not null && WarningWindow.Shows == shows &&
+            store.LoadReminders().Settings.BreakDisplay == BreakDisplay.TimerOnly,
+            "a stale guide click while hidden cannot write or start another preview");
+
+        tray.WorkSource = 202;
+        WhileDatabaseIsAbsent(path, () => ExpireWarning(session, queue));
+        Check(BreakWindow.Layout == BreakLayout.TimerOnly && BreakWindow.Text is null && BreakWindow.SavedTasks is null,
+            "the guide Timer only preview bypasses task reads");
+        tray.Send(TrayCommand.EndBreak);
+        Check(SurfaceWindow.Returned == 202 && store.List(archived: false).SequenceEqual(tasks) &&
+            store.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
+            "the preview returns to the latest work host and leaves tasks, shortcut and guide acknowledgement alone");
+        tray.Send(TrayCommand.Quit);
+
+        (_, queue, tray) = Open(new TaskStore(path), new TestClock(Start));
+        tray.Send(TrayCommand.CaptureSettings, 303);
+        Check(CaptureSettingsWindow.Current.Display == BreakDisplay.TimerOnly && !queue.Timers[1].Running,
+            "Getting started loads the saved choice after restart while reminders remain off");
+        tray.Send(TrayCommand.Quit);
+    }
+
+    private static void CheckGuideDuringSchedule(string path)
+    {
+        var store = new TaskStore(path);
+        var settings = ReminderSettings.Default with { Enabled = true, WorkSeconds = 5 };
+        store.SaveReminders(settings, new ReminderCheckpoint(ReminderPhase.Work, settings.WorkLength, 2, false, TimeSpan.Zero, Start));
+        var clock = new TestClock(Start);
+        var (session, queue, tray) = Open(store, clock);
+        var timer = queue.Timers[1];
+
+        void Tick(int seconds)
+        {
+            for (var index = 0; index < seconds; index++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+                timer.Fire();
+            }
+        }
+
+        Tick(18);
+        Check(BreakWindow.Current.Seconds == 27, "guide fixture reaches a partial scheduled break");
+        tray.Send(TrayCommand.CaptureSettings);
+        var guide = CaptureSettingsWindow.Current;
+        var before = store.LoadReminders().Checkpoint;
+        ExecuteSql(path, """
+            CREATE TRIGGER ignore_guide_write BEFORE UPDATE ON reminder_state BEGIN SELECT RAISE(IGNORE); END;
+            """);
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is not null && guide.IsVisible && timer.Running &&
+            store.LoadReminders() == (settings, before), "a failed guide save leaves the live schedule and durable reminder state alone");
+        ExecuteSql(path, "DROP TRIGGER ignore_guide_write;");
+        Check(guide.SaveAndPreview(BreakDisplay.TimerOnly) is null &&
+            store.LoadReminders() == (settings with { BreakDisplay = BreakDisplay.TimerOnly }, before),
+            "guide success persists only the display and leaves the checkpoint untouched");
+        ExpireWarning(session, queue);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 10,
+            "an enabled schedule still gets a ten-second manual guide preview");
+        tray.Send(TrayCommand.EndBreak);
+        timer.Fire();
+        Tick(10);
+        Check(BreakWindow.Current.IsVisible && BreakWindow.Current.Seconds == 27 &&
+            store.LoadReminders().Checkpoint?.CompletedShorts == 2,
+            "the guide preview earns no cadence credit and the interrupted break resumes with its remaining time");
         tray.Send(TrayCommand.Quit);
     }
 

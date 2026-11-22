@@ -69,7 +69,8 @@ namespace Afterbreak
             LastPresentationCheck = checkPresentation;
             return CheckSystemPause?.Invoke() ?? SystemPause;
         }
-        public nint WorkWindow() => 30;
+        public nint WorkSource { get; set; } = 30;
+        public nint WorkWindow() => WorkSource;
         public void ConfigureTrayFlyout(WindowAppearance appearance, Func<nint, Action<TrayCommand>> bindCommand) =>
             bindTrayCommand = bindCommand;
         public Action<TrayCommand> OpenTray(nint source)
@@ -196,20 +197,40 @@ namespace Afterbreak
         public bool CanPlace { get; set; } = true;
         public bool PlacementIsCurrent { get; set; } = true;
         public int Attempts { get; private set; }
+        public nint LastSource { get; private set; }
+        public bool CanShowPrepared { get; set; } = true;
 
         public bool TryShow(nint source, string? breakKind = null)
+        {
+            if (!TryPrepare(source, breakKind))
+            {
+                return false;
+            }
+            ShowPrepared();
+            return true;
+        }
+
+        public bool TryPrepare(nint source, string? breakKind = null)
         {
             Attempts++;
             if (!CanPlace)
             {
                 return false;
             }
-            Shows++;
+            LastSource = source;
             Seconds = 10;
             Kind = breakKind;
-            IsVisible = true;
             PlacementIsCurrent = true;
             return true;
+        }
+
+        public void ShowPrepared()
+        {
+            if (CanShowPrepared)
+            {
+                Shows++;
+                IsVisible = true;
+            }
         }
 
         public void Update(int seconds) => Seconds = seconds;
@@ -316,21 +337,33 @@ namespace Afterbreak
         public void CloseForQuit() => Close();
     }
 
-    internal sealed class CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide) : TestSurface
+    internal sealed class CaptureSettingsWindow(Func<CaptureShortcut, string?> apply, Func<bool> dismissGuide,
+        Func<BreakDisplay, string?> saveAndPreview) : TestSurface
     {
         public static CaptureSettingsWindow Current { get; private set; } = null!;
         public nint Handle => 302;
         public Func<CaptureShortcut, string?> Apply { get; } = apply;
         public Func<bool> DismissGuide { get; } = dismissGuide;
+        public Func<BreakDisplay, string?> SaveAndPreview { get; } = saveAndPreview;
         public CapturePreferences? Preferences { get; private set; }
+        public nint PreviewSource { get; private set; }
+        public BreakDisplay Display { get; private set; }
+        public bool Foreground { get; set; } = true;
+        public bool GuideHasForeground => IsVisible && Foreground;
 
-        public void Show(nint source, CapturePreferences preferences, string description)
+        public void Show(nint source, CapturePreferences preferences, string description, BreakDisplay display)
         {
             Current = this;
             Preferences = preferences;
+            if (!IsVisible)
+            {
+                PreviewSource = source;
+                Display = display;
+            }
             IsVisible = true;
         }
 
+        public void HideForPreview() => SurfaceWindow.HideAndReturn(this, PreviewSource);
         public void SetStatus(string description) { }
         public void CloseForQuit() => Close();
     }

@@ -10,12 +10,13 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'installer\PackagePolicy.ps1')
+$repo = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repo 'installer\PackagePolicy.ps1')
 
-$repo = $PSScriptRoot
 $compilerVersion = '7.1.1'
 $expectedCompilerSha = 'e0f9f1dc32032650c6629f6dee41eb6d20ba140e4e3c07c25d8a24f9ba781644'
-$version = ([xml](Get-Content (Join-Path $repo 'OpenBreak.csproj') -Raw)).Project.PropertyGroup.Version
+$projectPath = 'src/OpenBreak/OpenBreak.csproj'
+$version = ([xml](Get-Content (Join-Path $repo $projectPath) -Raw)).Project.PropertyGroup.Version
 if ($version -notmatch '^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$' -or
     @($version.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count) {
     throw 'OpenBreak.csproj must specify a numeric major.minor.patch version.'
@@ -27,7 +28,7 @@ function Get-InstallerSource {
     $changes = @(& git -C $repo --no-optional-locks status --porcelain --untracked-files=all)
     if ($LASTEXITCODE -ne 0) { throw 'Could not check whether installer source is clean.' }
     $hashes = [ordered]@{}
-    foreach ($path in @('OpenBreak.csproj', 'Build-Installer.ps1', 'installer/OpenBreak.iss',
+    foreach ($path in @($projectPath, 'build/Build-Installer.ps1', 'installer/OpenBreak.iss',
         'installer/InstallPolicy.iss', 'installer/PackagePolicy.ps1')) {
         $hashes[$path] = Get-Sha256 (Join-Path $repo $path)
     }

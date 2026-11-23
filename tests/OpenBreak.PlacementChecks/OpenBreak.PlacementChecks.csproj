@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../MonitorPlacement.cs" Link="MonitorPlacement.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/MonitorPlacement.cs" Link="MonitorPlacement.cs" />
   </ItemGroup>
 </Project>

@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../LaunchPipe.cs" Link="LaunchPipe.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/LaunchPipe.cs" Link="LaunchPipe.cs" />
   </ItemGroup>
 </Project>

@@ -6,14 +6,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />
-    <Compile Include="../../AppearancePolicy.cs" Link="AppearancePolicy.cs" />
-    <Compile Include="../../AppearanceStorage.cs" Link="AppearanceStorage.cs" />
-    <Compile Include="../../FloatingTimerPlacementStorage.cs" Link="FloatingTimerPlacementStorage.cs" />
-    <Compile Include="../../CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
-    <Compile Include="../../CaptureStorage.cs" Link="CaptureStorage.cs" />
-    <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
-    <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/TaskStore.cs" Link="TaskStore.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Appearance/AppearancePolicy.cs" Link="AppearancePolicy.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/AppearanceStorage.cs" Link="AppearanceStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/FloatingTimerPlacementStorage.cs" Link="FloatingTimerPlacementStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Capture/CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/CaptureStorage.cs" Link="CaptureStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/ReminderStorage.cs" Link="ReminderStorage.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
   </ItemGroup>
 </Project>

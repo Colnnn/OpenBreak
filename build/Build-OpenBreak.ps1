@@ -15,9 +15,10 @@ $ErrorActionPreference = 'Stop'
 if ($CaptureMotionStudy -and $Action -ne 'Launch') {
     throw '-CaptureMotionStudy is only available with -Action Launch.'
 }
-$repository = $PSScriptRoot
+$repository = Split-Path -Parent $PSScriptRoot
 $config = Join-Path $repository 'NuGet.Config'
-$project = Join-Path $repository 'OpenBreak.csproj'
+$projectDirectory = Join-Path $repository 'src\OpenBreak'
+$project = Join-Path $projectDirectory 'OpenBreak.csproj'
 $sdkVersion = (Get-Content (Join-Path $repository 'global.json') -Raw | ConvertFrom-Json).sdk.version
 $runtimeVersion = '10.0.15'
 $rid = 'win-x64'
@@ -81,7 +82,7 @@ function Get-SourceState {
 }
 
 function Copy-DependencyNotices($payload) {
-    $assets = Get-Content (Join-Path $repository 'obj\project.assets.json') -Raw | ConvertFrom-Json
+    $assets = Get-Content (Join-Path $projectDirectory 'obj\project.assets.json') -Raw | ConvertFrom-Json
     $packages = @($assets.packageFolders.PSObject.Properties.Name)
     $notices = [IO.Directory]::CreateDirectory((Join-Path $payload 'ThirdParty')).FullName
     $runtimePackages = @("microsoft.netcore.app.runtime.win-x64/$runtimeVersion")
@@ -119,10 +120,10 @@ function Write-Artifact($stage, $payload, $source) {
         runtime = $runtimeVersion
         runtimeIdentifier = $rid
         sourceChecksumsSha256 = Get-Hash $sourcePath
-        dependenciesLockSha256 = Get-Hash (Join-Path $repository 'packages.lock.json')
+        dependenciesLockSha256 = Get-Hash (Join-Path $projectDirectory 'packages.lock.json')
     }
     [IO.File]::WriteAllText((Join-Path $payload 'build-info.json'), ($info | ConvertTo-Json) + "`n", $utf8)
-    Copy-Item -LiteralPath (Join-Path $repository 'packages.lock.json') -Destination (Join-Path $payload 'dependencies.lock.json')
+    Copy-Item -LiteralPath (Join-Path $projectDirectory 'packages.lock.json') -Destination (Join-Path $payload 'dependencies.lock.json')
 
     [string[]] $paths = @(Get-ChildItem -LiteralPath $payload -File -Force -Recurse |
         ForEach-Object { $_.FullName.Substring($payload.Length + 1).Replace('\', '/') })
@@ -161,7 +162,8 @@ function Publish-Package($destination, $source) {
     try {
         Invoke-Checked $sdk @('publish', $project, '-c', $Configuration, '--no-restore', '-r', $rid,
             '--self-contained', 'true', '-o', $payload)
-        foreach ($name in @('OpenBreak.exe', 'OpenBreak.pri', 'App.xbf', 'coreclr.dll', 'hostpolicy.dll', 'Microsoft.UI.Xaml.dll', 'e_sqlite3.dll')) {
+        foreach ($name in @('OpenBreak.exe', 'OpenBreak.pri', 'App.xbf', 'coreclr.dll', 'hostpolicy.dll', 'Microsoft.UI.Xaml.dll',
+            'e_sqlite3.dll', 'AssetCredits.txt', 'LICENSE')) {
             if (-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)) {
                 throw "Self-contained publish is missing $name."
             }
@@ -204,7 +206,7 @@ try {
     if (-not $DotNetPath) {
         $localSdk = Join-Path (Split-Path -Parent $repository) ".tools\dotnet-$sdkVersion\dotnet.exe"
         $DotNetPath = if (Test-Path -LiteralPath $localSdk -PathType Leaf) { $localSdk } else {
-            (Get-Command dotnet.exe -CommandType Application).Source
+            (Get-Command dotnet.exe -CommandType Application | Select-Object -First 1).Source
         }
     }
     $sdk = $DotNetPath

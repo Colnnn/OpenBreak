@@ -6,23 +6,23 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../OpenBreakSession.cs" Link="OpenBreakSession.cs" />
-    <Compile Include="../../ReminderSession.cs" Link="ReminderSession.cs" />
-    <Compile Include="../../FocusSnapshot.cs" Link="FocusSnapshot.cs" />
-    <Compile Include="../../CountdownDisplay.cs" Link="CountdownDisplay.cs" />
-    <Compile Include="../../TrayIconLifetime.cs" Link="TrayIconLifetime.cs" />
-    <Compile Include="../../TrayCountdownIcon.cs" Link="TrayCountdownIcon.cs" />
-    <Compile Include="../../TrayMenuState.cs" Link="TrayMenuState.cs" />
-    <Compile Include="../../BreakView.cs" Link="BreakView.cs" />
-    <Compile Include="../../BreakDiagnostics.cs" Link="BreakDiagnostics.cs" />
-    <Compile Include="../../ReminderScheduler.cs" Link="ReminderScheduler.cs" />
-    <Compile Include="../../ReminderStorage.cs" Link="ReminderStorage.cs" />
-    <Compile Include="../../TaskStore.cs" Link="TaskStore.cs" />
-    <Compile Include="../../AppearancePolicy.cs" Link="AppearancePolicy.cs" />
-    <Compile Include="../../AppearanceStorage.cs" Link="AppearanceStorage.cs" />
-    <Compile Include="../../FloatingTimerPlacementStorage.cs" Link="FloatingTimerPlacementStorage.cs" />
-    <Compile Include="../../CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
-    <Compile Include="../../CaptureStorage.cs" Link="CaptureStorage.cs" />
+    <Compile Include="../../src/OpenBreak/OpenBreakSession.cs" Link="OpenBreakSession.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/ReminderSession.cs" Link="ReminderSession.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Focus/FocusSnapshot.cs" Link="FocusSnapshot.cs" />
+    <Compile Include="../../src/OpenBreak/Controls/CountdownDisplay.cs" Link="CountdownDisplay.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/TrayIconLifetime.cs" Link="TrayIconLifetime.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/TrayCountdownIcon.cs" Link="TrayCountdownIcon.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/TrayMenuState.cs" Link="TrayMenuState.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Breaks/BreakView.cs" Link="BreakView.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Breaks/BreakDiagnostics.cs" Link="BreakDiagnostics.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/ReminderStorage.cs" Link="ReminderStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/TaskStore.cs" Link="TaskStore.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Appearance/AppearancePolicy.cs" Link="AppearancePolicy.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/AppearanceStorage.cs" Link="AppearanceStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/FloatingTimerPlacementStorage.cs" Link="FloatingTimerPlacementStorage.cs" />
+    <Compile Include="../../src/OpenBreak/Features/Capture/CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
+    <Compile Include="../../src/OpenBreak/Storage/CaptureStorage.cs" Link="CaptureStorage.cs" />
     <Compile Include="../TestClock.cs" Link="TestClock.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
   </ItemGroup>

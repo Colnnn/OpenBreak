@@ -47,13 +47,13 @@ if ($DownloadCompiler) { $CompilerPath = Get-PortableCompiler $output }
 
 $package = Join-Path $output 'package'
 $installer = Join-Path $output 'installer'
-$build = Join-Path $repository 'Build-OpenBreak.ps1'
+$build = Join-Path $repository 'build\Build-OpenBreak.ps1'
 & $build -Action Test -Configuration Release -DotNetPath $DotNetPath
 & $build -Action Package -Configuration Release -OutputDirectory $package -DotNetPath $DotNetPath
 
 $zip = Join-Path $package 'OpenBreak-win-x64.zip'
 $packageHash = Get-Sha256 $zip
-& (Join-Path $repository 'Build-Installer.ps1') -PackageZip $zip -ExpectedPackageSha256 $packageHash `
+& (Join-Path $repository 'build\Build-Installer.ps1') -PackageZip $zip -ExpectedPackageSha256 $packageHash `
     -PackageRevision $revision -OutputDirectory $installer -CompilerPath $CompilerPath
 
 $info = Get-Content -LiteralPath (Join-Path $installer 'installer-build-info.json') -Raw | ConvertFrom-Json

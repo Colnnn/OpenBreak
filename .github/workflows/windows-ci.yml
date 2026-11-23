@@ -37,5 +37,5 @@ jobs:
       - name: Test, package, and compile the installer
         run: |
           $output = Join-Path $env:RUNNER_TEMP "openbreak-ci-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $sdk = (Get-Command dotnet.exe -CommandType Application).Source
+          $sdk = Join-Path $env:DOTNET_ROOT 'dotnet.exe'
           .\.github\scripts\Build-Windows.ps1 -OutputDirectory $output -ExpectedRevision $env:GITHUB_SHA -DotNetPath $sdk -DownloadCompiler

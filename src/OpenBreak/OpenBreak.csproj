@@ -24,8 +24,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.7.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
-    <Compile Remove="tests\**\*.cs" />
-    <None Update="AssetCredits.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Assets\AssetCredits.txt" TargetPath="AssetCredits.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="IncludeOpenBreakXamlInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>

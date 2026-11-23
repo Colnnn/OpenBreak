@@ -78,10 +78,10 @@ function Expand-Fixture($path) {
 }
 
 try {
-    $launchSource = Get-Content (Join-Path $repo 'LaunchPipe.cs') -Raw
+    $launchSource = Get-Content (Join-Path $repo 'src\OpenBreak\Platform\LaunchPipe.cs') -Raw
     $startupPolicy = Get-Content (Join-Path $repo 'installer\InstallPolicy.iss') -Raw
     $setupSource = Get-Content (Join-Path $repo 'installer\OpenBreak.iss') -Raw
-    $version = ([xml](Get-Content (Join-Path $repo 'OpenBreak.csproj') -Raw)).Project.PropertyGroup.Version
+    $version = ([xml](Get-Content (Join-Path $repo 'src\OpenBreak\OpenBreak.csproj') -Raw)).Project.PropertyGroup.Version
     $flag = [regex]::Match($launchSource, 'StartupFlag = "([^"]+)";').Groups[1].Value
     $suffix = [regex]::Match($startupPolicy, "QuietStartupSuffix = '([^']+)';").Groups[1].Value
     $startLink = [regex]::Match($setupSource, '(?ms)^\[Icons\]\r?\n(.*?)^\[').Groups[1].Value

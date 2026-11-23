@@ -46,8 +46,9 @@ internal sealed class Desktop : IDisposable
     private bool versionFourIcon;
     private DispatcherQueueTimer? trayAddRetry;
     private int trayAddAttempts;
+    private CountdownDisplay? trayCountdown;
     private string? countdownStatus;
-    private TrayIconDesign? countdownDesign;
+    private TrayIconDesign trayDesign = TrayIconDesign.For(null, default);
     private TrayFlyoutWindow? trayFlyout;
     private WindowAppearance? trayAppearance;
     private Func<nint, Action<TrayCommand>>? bindTrayCommand;
@@ -361,6 +362,7 @@ internal sealed class Desktop : IDisposable
         if (!disposed)
         {
             DismissIfTrayPlacementInvalid();
+            RefreshTrayIcon();
             DisplaysChanged?.Invoke();
         }
     });
@@ -402,17 +404,19 @@ internal sealed class Desktop : IDisposable
     internal void SetCountdown(CountdownDisplay? countdown, AppearanceState appearance)
     {
         var statusChanged = countdownStatus != countdown?.Status;
+        trayCountdown = countdown;
         countdownStatus = countdown?.Status;
-        countdownDesign = countdown is { Glyphs: { } glyphs } display
-            ? new TrayIconDesign(glyphs, display.FinalMinute, TrayIconSize(),
-                appearance.HighContrast ? appearance.WindowColor : display.FinalMinute ? 0x812E2AU : 0x1B3034U,
-                appearance.HighContrast ? appearance.TextColor : display.FinalMinute ? 0xFFF4D3U : 0xFFFFFFU)
-            : null;
-        RefreshTrayIcon();
+        SetTrayAppearance(appearance);
         if (statusChanged)
         {
             RefreshTrayFlyout();
         }
+    }
+
+    internal void SetTrayAppearance(AppearanceState appearance)
+    {
+        trayDesign = TrayIconDesign.For(trayCountdown, appearance);
+        RefreshTrayIcon();
     }
 
     private static int TrayIconSize()
@@ -438,7 +442,7 @@ internal sealed class Desktop : IDisposable
 
         var tip = countdownStatus is { } countdown ? $"OpenBreak · {countdown}" :
             CaptureBinding.Active is { } active ? $"OpenBreak · {active}" : "OpenBreak · Shortcut unavailable";
-        var result = trayIcon.Apply(countdownDesign, tip, add, (icon, tooltip, changeIcon, changeTip) =>
+        var result = trayIcon.Apply(trayDesign with { Size = TrayIconSize() }, tip, add, (icon, tooltip, changeIcon, changeTip) =>
         {
             var data = IconData();
             data.Flags = (add ? 0x1U : 0U) | (changeIcon ? 0x2U : 0U) | (changeTip ? 0x84U : 0U);
@@ -498,7 +502,7 @@ internal sealed class Desktop : IDisposable
     private TrayMenuState CurrentTrayMenu() => new(CaptureBinding.Active?.ToString(),
         PreviewAvailable && GetSystemPause(checkPresentation: true) == ReminderPause.None,
         DismissLabel, ReminderStatus, ManuallyPaused, SnoozeAvailable, SkipAvailable, SnoozeSeconds,
-        countdownDesign is not null ? countdownStatus : null, FloatingTimerHidden);
+        trayDesign.Glyphs is not null ? countdownStatus : null, FloatingTimerHidden);
 
     internal void RefreshTrayFlyout()
     {
@@ -708,10 +712,6 @@ internal sealed class Desktop : IDisposable
             iconAdded = versionFourIcon = false;
             trayAddRetry?.Stop();
             trayAddAttempts = 0;
-            if (countdownDesign is { } design)
-            {
-                countdownDesign = design with { Size = TrayIconSize() };
-            }
             RefreshTrayIcon();
             return 0;
         }

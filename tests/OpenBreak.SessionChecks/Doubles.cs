@@ -96,6 +96,8 @@ namespace OpenBreak
         public void ChangeDisplays() => DisplaysChanged?.Invoke();
         public void RefreshShortcutTip() { }
         public void SetCountdown(CountdownDisplay? display, AppearanceState appearance) => Countdown = display;
+        public void SetTrayAppearance(AppearanceState appearance) => TrayAppearance = appearance;
+        public AppearanceState TrayAppearance { get; private set; }
         public void Dispose()
         {
             CaptureBinding.Dispose();
@@ -559,6 +561,8 @@ namespace OpenBreak
 
     internal sealed class WindowAppearance : IDisposable
     {
+        private FloatingTimerWindow? floating;
+
         public WindowAppearance(Microsoft.UI.Dispatching.DispatcherQueue dispatcher, TestSurface anchor, AppearancePreferences preferences)
         {
             Current = this;
@@ -569,9 +573,22 @@ namespace OpenBreak
         public AppearancePreferences Preferences { get; private set; }
         public AppearanceState State => AppearancePolicy.Resolve(Preferences, new(false, true, true, 1, 0xFFFFFF, 0));
         public bool Disposed { get; private set; }
+        public event Action<AppearanceState>? Changed;
 
-        public void Track(TestSurface surface, SurfaceMaterial material) { }
-        public void Apply(AppearancePreferences preferences) => Preferences = preferences;
+        public void Track(TestSurface surface, SurfaceMaterial material)
+        {
+            if (surface is FloatingTimerWindow timer)
+            {
+                floating = timer;
+                timer.ApplyAppearance(State);
+            }
+        }
+        public void Apply(AppearancePreferences preferences)
+        {
+            Preferences = preferences;
+            floating?.ApplyAppearance(State);
+            Changed?.Invoke(State);
+        }
         public void Dispose() => Disposed = true;
     }
 
@@ -583,6 +600,8 @@ namespace OpenBreak
         public bool KeepOnTop { get; private set; }
         public FloatingTimerPosition? OriginalPosition { get; } = position;
         public int DisplayChanges { get; private set; }
+        public FloatingTimerStyle Style { get; private set; }
+        public void ApplyAppearance(AppearanceState state) => Style = state.TimerStyle;
         public void Present(CountdownDisplay display, bool keepOnTop)
         {
             Display = display;

@@ -14,6 +14,7 @@ internal sealed class AppearanceSettingsPage : UserControl
     private readonly ToggleSwitch sound = new();
     private readonly ToggleSwitch trayCountdown = new();
     private readonly ToggleSwitch floatingTimer = new();
+    private readonly ComboBox floatingStyle = new() { Header = "Floating timer style", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ToggleSwitch floatingOnTop = new();
     private readonly ScenePreview preview = new();
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
@@ -41,12 +42,16 @@ internal sealed class AppearanceSettingsPage : UserControl
         }
         motion.Items.Add("Follow Windows");
         motion.Items.Add("Off");
+        foreach (var label in Enum.GetNames<FloatingTimerStyle>())
+        {
+            floatingStyle.Items.Add(label);
+        }
         scene.SelectionChanged += (_, _) => UpdatePreview();
         LabelToggle(sound, "Play a sound when a break starts");
         LabelToggle(trayCountdown, "Show countdown in the system tray");
         LabelToggle(floatingTimer, "Show a floating desktop timer");
         LabelToggle(floatingOnTop, "Keep the floating timer on top");
-        floatingTimer.Toggled += (_, _) => floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
+        floatingTimer.Toggled += (_, _) => UpdateFloatingControls();
 
         var sampleTitle = SurfaceStyle.Label("Scene preview", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
         sampleTitle.TextWrapping = TextWrapping.Wrap;
@@ -90,6 +95,7 @@ internal sealed class AppearanceSettingsPage : UserControl
         form.Children.Add(countdown);
         form.Children.Add(trayCountdown);
         form.Children.Add(floatingTimer);
+        form.Children.Add(floatingStyle);
         form.Children.Add(floatingOnTop);
         actions.Children.Add(saveButton);
         actions.Children.Add(discard);
@@ -108,9 +114,11 @@ internal sealed class AppearanceSettingsPage : UserControl
     }
 
     private AppearancePreferences Draft => new((AppearanceTheme)theme.SelectedIndex, (BreakScene)scene.SelectedIndex,
-        (SceneMotion)motion.SelectedIndex, sound.IsOn, trayCountdown.IsOn, floatingTimer.IsOn, floatingOnTop.IsOn);
+        (SceneMotion)motion.SelectedIndex, sound.IsOn, trayCountdown.IsOn, floatingTimer.IsOn, floatingOnTop.IsOn,
+        (FloatingTimerStyle)floatingStyle.SelectedIndex);
     internal bool IsDirty => Draft != saved;
-    internal bool HasFocusedEditor => theme.IsDropDownOpen || scene.IsDropDownOpen || motion.IsDropDownOpen;
+    internal bool HasFocusedEditor => theme.IsDropDownOpen || scene.IsDropDownOpen || motion.IsDropDownOpen ||
+        floatingStyle.IsDropDownOpen;
 
     internal void ApplyAppearance(AppearanceState state)
     {
@@ -139,6 +147,7 @@ internal sealed class AppearanceSettingsPage : UserControl
         sound.IsOn = preferences.BreakStartSound;
         trayCountdown.IsOn = preferences.TrayCountdown;
         floatingTimer.IsOn = preferences.FloatingTimer;
+        floatingStyle.SelectedIndex = (int)preferences.TimerStyle;
         floatingOnTop.IsOn = preferences.FloatingTimerOnTop;
         error.Message = "Couldn’t load the saved appearance. Return to Appearance to retry.";
         error.IsOpen = loadFailed;
@@ -149,7 +158,12 @@ internal sealed class AppearanceSettingsPage : UserControl
         sound.IsEnabled = !loadFailed;
         trayCountdown.IsEnabled = !loadFailed;
         floatingTimer.IsEnabled = !loadFailed;
-        floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
+        UpdateFloatingControls();
+    }
+
+    private void UpdateFloatingControls()
+    {
+        floatingStyle.IsEnabled = floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
     }
 
     private static void LabelToggle(ToggleSwitch toggle, string label)

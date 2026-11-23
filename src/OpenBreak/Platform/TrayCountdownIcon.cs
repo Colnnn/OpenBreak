@@ -4,60 +4,157 @@ namespace OpenBreak;
 
 internal static class TrayCountdownIcon
 {
-    private static readonly string[] Digits =
+    // Rounded monoline figures in a 16-unit icon. Keep their counters open at 16 px.
+    private static readonly Point[][] Digits =
     [
-        "111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
-        "111100111001111", "111100111101111", "111001010010010", "111101111101111", "111101111001111",
+        [new(-.8, -4), new(.8, -4), new(1.7, -3), new(1.7, 3), new(.8, 4), new(-.8, 4), new(-1.7, 3), new(-1.7, -3), new(-.8, -4)],
+        [new(-1.2, -2.5), new(.2, -4), new(.2, 4)],
+        [new(-1.6, -3), new(-.8, -4), new(.8, -4), new(1.7, -3), new(1.7, -1.5), new(-1.7, 2.2), new(-1.7, 4), new(1.7, 4)],
+        [new(-1.5, -4), new(.8, -4), new(1.7, -3), new(1.7, -1), new(.8, 0), new(-.5, 0),
+            new(.8, 0), new(1.7, 1), new(1.7, 3), new(.8, 4), new(-1.5, 4)],
+        [new(-.4, -4), new(-1.7, .8), new(1.7, .8), new(1.7, -4), new(1.7, 4)],
+        [new(1.6, -4), new(-1.5, -4), new(-1.5, -.2), new(.7, -.2), new(1.7, .8), new(1.7, 3), new(.7, 4), new(-1.5, 4)],
+        [new(1.3, -4), new(-.5, -4), new(-1.7, -2.4), new(-1.7, 3), new(-.8, 4), new(.8, 4),
+            new(1.7, 3), new(1.7, .7), new(.8, -.2), new(-1.7, -.2)],
+        [new(-1.7, -4), new(1.7, -4), new(1.7, -3), new(-.7, 4)],
+        [new(.8, 0), new(1.6, -1), new(1.6, -3), new(.7, -4), new(-.7, -4), new(-1.6, -3), new(-1.6, -1), new(-.8, 0),
+            new(.8, 0), new(1.7, 1), new(1.7, 3), new(.8, 4), new(-.8, 4), new(-1.7, 3), new(-1.7, 1), new(-.8, 0)],
+        [new(-1.3, 4), new(.5, 4), new(1.7, 2.4), new(1.7, -3), new(.8, -4), new(-.8, -4),
+            new(-1.7, -3), new(-1.7, -.7), new(-.8, .2), new(1.7, .2)],
     ];
-    private const string Plus = "000010111010000";
-    private const string PauseBar = "010010010010010";
 
     internal static int[] Rasterize(TrayIconDesign design)
     {
         var size = design.Size;
         var pixels = new int[size * size];
-        var background = Opaque(design.Background);
-        var ink = Opaque(design.Ink);
-        Array.Fill(pixels, background);
-        pixels[0] = pixels[size - 1] = pixels[size * (size - 1)] = pixels[^1] = 0;
-        var inset = Math.Max(1, size / 12);
-        var glyphWidth = design.Glyphs.Length * 4 - 1;
-        var availableWidth = Math.Min(size - inset * 2, (int)Math.Round(glyphWidth * size / 8.0));
-        var left = (size - availableWidth) / 2;
-        var top = size / 5 - (design.FinalMinute ? inset : 0);
-        var height = size - 2 * (size / 5);
-        for (var digit = 0; digit < design.Glyphs.Length; digit++)
+        var pixelWidth = 16.0 / size;
+        var strokes = MakeStrokes(design);
+        var strokeRadius = design.Glyphs switch
         {
-            var pattern = design.Glyphs[digit] switch
+            null => .86,
+            "II" => .90,
+            { Length: 3 } => .63,
+            _ => .83,
+        };
+        for (var row = 0; row < size; row++)
+        {
+            for (var column = 0; column < size; column++)
             {
-                '+' => Plus,
-                'I' => PauseBar,
-                var number => Digits[number - '0'],
-            };
-            for (var row = 0; row < 5; row++)
-            {
-                for (var column = 0; column < 3; column++)
+                var x = (column + .5) * pixelWidth - 8;
+                var y = (row + .5) * pixelWidth - 8;
+                var cx = Math.Max(0, Math.Abs(x) - 4.15);
+                var cy = Math.Max(0, Math.Abs(y) - 3.9);
+                var alpha = Coverage(Math.Sqrt(cx * cx + cy * cy) - 3.5);
+                if (alpha == 0)
                 {
-                    if (pattern[row * 3 + column] == '1')
-                    {
-                        var x0 = left + (digit * 4 + column) * availableWidth / glyphWidth;
-                        var x1 = left + (digit * 4 + column + 1) * availableWidth / glyphWidth;
-                        for (var y = top + row * height / 5; y < top + (row + 1) * height / 5; y++)
-                        {
-                            Array.Fill(pixels, ink, y * size + x0, x1 - x0);
-                        }
-                    }
+                    continue;
                 }
+                var distance = double.PositiveInfinity;
+                foreach (var stroke in strokes)
+                {
+                    distance = Math.Min(distance, stroke.SquaredDistance(x, y));
+                }
+                var ink = Coverage(Math.Sqrt(distance) - strokeRadius);
+                pixels[row * size + column] = Pixel(design.Background, design.Ink, alpha, ink);
+            }
+        }
+        return pixels;
+
+        double Coverage(double distance) => Math.Clamp(.5 - distance / pixelWidth, 0, 1);
+    }
+
+    private static List<Stroke> MakeStrokes(TrayIconDesign design)
+    {
+        List<Stroke> strokes = [];
+        if (design.Glyphs is not { } glyphs)
+        {
+            // An open circular ring frames the pause symbol.
+            const int steps = 20;
+            var previous = RingPoint(0);
+            for (var step = 1; step <= steps; step++)
+            {
+                var next = RingPoint(step);
+                strokes.Add(new Stroke(previous, next));
+                previous = next;
+            }
+            Line(-1.65, -2.3, -1.65, 2.3);
+            Line(1.65, -2.3, 1.65, 2.3);
+            return strokes;
+
+            static Point RingPoint(int step)
+            {
+                var angle = (step * 310.0 / steps - 15) * Math.PI / 180;
+                return new Point(5.2 * Math.Cos(angle), 5.2 * Math.Sin(angle));
+            }
+        }
+        var y = design.FinalMinute ? -1.1 : 0;
+        var stepWidth = glyphs.Length == 3 ? 4.75 : glyphs == "II" ? 3.4 : 5.4;
+        var horizontalScale = glyphs.Length == 3 ? .8 : 1;
+        for (var index = 0; index < glyphs.Length; index++)
+        {
+            var x = (index - (glyphs.Length - 1) * .5) * stepWidth;
+            switch (glyphs[index])
+            {
+                case 'I':
+                    Line(x, -3.6, x, 3.6);
+                    break;
+                case '+':
+                    Line(x - 1.25, y, x + 1.25, y);
+                    Line(x, y - 1.6, x, y + 1.6);
+                    break;
+                case var digit when char.IsAsciiDigit(digit):
+                    var path = Digits[digit - '0'];
+                    for (var segment = 1; segment < path.Length; segment++)
+                    {
+                        var a = path[segment - 1];
+                        var b = path[segment];
+                        Line(x + a.X * horizontalScale, y + a.Y, x + b.X * horizontalScale, y + b.Y);
+                    }
+                    if (digit == '1')
+                    {
+                        Line(x - 1.2 * horizontalScale, y + 4, x + 1.5 * horizontalScale, y + 4);
+                    }
+                    break;
             }
         }
         if (design.FinalMinute)
         {
-            for (var y = size - 2 * inset; y < size - inset; y++)
-            {
-                Array.Fill(pixels, ink, y * size + 2 * inset, size - 4 * inset);
-            }
+            Line(-3.0, 5.3, 3.0, 5.3);
         }
-        return pixels;
+        return strokes;
+
+        void Line(double x0, double y0, double x1, double y1) =>
+            strokes.Add(new Stroke(new Point(x0, y0), new Point(x1, y1)));
+    }
+
+    private static int Pixel(uint background, uint ink, double alpha, double coverage)
+    {
+        // Windows expects the DIB's BGRA color channels to be premultiplied by alpha.
+        var a = (int)Math.Round(alpha * 255);
+        return (a << 24) | (Channel(16) << 16) | (Channel(8) << 8) | Channel(0);
+
+        int Channel(int shift)
+        {
+            var from = (background >> shift) & 0xff;
+            var to = (ink >> shift) & 0xff;
+            return (int)Math.Round(alpha * (from * (1 - coverage) + to * coverage));
+        }
+    }
+
+    private readonly record struct Point(double X, double Y);
+
+    private readonly struct Stroke(Point from, Point to)
+    {
+        private readonly double dx = to.X - from.X;
+        private readonly double dy = to.Y - from.Y;
+
+        internal double SquaredDistance(double x, double y)
+        {
+            var along = Math.Clamp(((x - from.X) * dx + (y - from.Y) * dy) / (dx * dx + dy * dy), 0, 1);
+            var offsetX = x - from.X - along * dx;
+            var offsetY = y - from.Y - along * dy;
+            return offsetX * offsetX + offsetY * offsetY;
+        }
     }
 
     internal static nint Create(TrayIconDesign design)
@@ -93,8 +190,6 @@ internal static class TrayCountdownIcon
             DeleteObject(color);
         }
     }
-
-    private static int Opaque(uint color) => unchecked((int)(0xff000000 | color));
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfo

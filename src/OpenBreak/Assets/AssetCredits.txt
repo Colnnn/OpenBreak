@@ -9,10 +9,11 @@ Sound
 The optional break-start cue is an original two-note chime synthesized
 as PCM by BreakStartSound.cs. No recording or external sound asset is used.
 
-Windows resources
+Tray and Windows resources
+The OpenBreak notification mark and countdown numerals are drawn in code
+by TrayCountdownIcon.cs. A shared Windows icon provides a fallback.
 The interface uses Windows system fonts, including Segoe UI Variable
-Display for the break timer. OpenBreak loads the shared Windows
-information icon from the operating system for its notification icon.
+Display for the break timer.
 
 Bundled components
 The ThirdParty folder contains license and notice files for the .NET

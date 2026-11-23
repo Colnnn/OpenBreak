@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
 
@@ -10,6 +11,9 @@ internal sealed class FloatingTimerWindow : Window
     private readonly TextBlock time = SurfaceStyle.Timer("", 30);
     private readonly TextBlock phase = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Body);
     private readonly Border frame;
+    private readonly Button hide;
+    private readonly Grid body;
+    private readonly ToolTip compactStatus = new();
     private readonly Action hideForSession;
     private readonly Action<FloatingTimerPosition> savePosition;
     private readonly bool activationGuarded;
@@ -19,6 +23,8 @@ internal sealed class FloatingTimerWindow : Window
     private bool dragged;
     private bool topmost;
     private bool closingForQuit;
+    private bool compact;
+    private string status = "";
     private int width = 218;
     private int height = 94;
 
@@ -28,7 +34,7 @@ internal sealed class FloatingTimerWindow : Window
         this.savePosition = savePosition;
         this.position = position;
         Title = "OpenBreak · Floating timer";
-        var hide = new Button
+        hide = new Button
         {
             Content = "\u00d7",
             AllowFocusOnInteraction = false,
@@ -44,7 +50,7 @@ internal sealed class FloatingTimerWindow : Window
         var labels = new StackPanel { Spacing = SurfaceStyle.TightGap, VerticalAlignment = VerticalAlignment.Center };
         labels.Children.Add(time);
         labels.Children.Add(phase);
-        var body = new Grid { Margin = new Thickness(SurfaceStyle.ContentGap), ColumnSpacing = SurfaceStyle.ControlGap };
+        body = new Grid { Margin = new Thickness(SurfaceStyle.ContentGap), ColumnSpacing = SurfaceStyle.ControlGap };
         body.ColumnDefinitions.Add(new ColumnDefinition());
         body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         body.Children.Add(labels);
@@ -81,6 +87,16 @@ internal sealed class FloatingTimerWindow : Window
         if (phase.Text != display.Phase)
         {
             phase.Text = display.Phase;
+            compactStatus.Content = display.Phase;
+        }
+        var nextStatus = display.Status;
+        if (status != nextStatus)
+        {
+            status = nextStatus;
+            if (compact)
+            {
+                AutomationProperties.SetName(time, status);
+            }
         }
     }
 
@@ -118,8 +134,36 @@ internal sealed class FloatingTimerWindow : Window
     {
         SurfaceStyle.ApplyContrast(time, state);
         SurfaceStyle.ApplyContrast(phase, state);
-        var nextWidth = state.ScaleWidth(218);
-        var nextHeight = state.ScaleHeight(94);
+        var nextCompact = state.TimerStyle == FloatingTimerStyle.Compact;
+        if (compact != nextCompact)
+        {
+            compact = nextCompact;
+            phase.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+            time.FontSize = compact ? 21 : 30;
+            time.FontWeight = compact ? FontWeights.SemiBold : FontWeights.Light;
+            time.TextAlignment = compact ? TextAlignment.Center : TextAlignment.Left;
+            frame.CornerRadius = new CornerRadius(compact ? 12 : 0);
+            body.Margin = compact ? new Thickness(10, 0, 6, 0) : new Thickness(SurfaceStyle.ContentGap);
+            body.ColumnSpacing = compact ? SurfaceStyle.TightGap : SurfaceStyle.ControlGap;
+            hide.VerticalAlignment = compact ? VerticalAlignment.Center : VerticalAlignment.Top;
+            ToolTipService.SetToolTip(time, compact ? compactStatus : null);
+            if (compact)
+            {
+                hide.Width = 32;
+                hide.Height = 32;
+                hide.Padding = new Thickness(0);
+                AutomationProperties.SetName(time, status);
+            }
+            else
+            {
+                hide.ClearValue(FrameworkElement.WidthProperty);
+                hide.ClearValue(FrameworkElement.HeightProperty);
+                hide.ClearValue(Control.PaddingProperty);
+                time.ClearValue(AutomationProperties.NameProperty);
+            }
+        }
+        var nextWidth = compact ? 154 + (int)Math.Ceiling(94 * (state.TextScale - 1)) : state.ScaleWidth(218);
+        var nextHeight = compact ? 48 + (int)Math.Ceiling(28 * (state.TextScale - 1)) : state.ScaleHeight(94);
         if (nextWidth != width || nextHeight != height)
         {
             width = nextWidth;

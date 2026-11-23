@@ -54,6 +54,8 @@ internal sealed partial class OpenBreakSession
         desktop.RefreshShortcutTip();
         LoadAppearance();
         appearance = new WindowAppearance(dispatcher, capture, appearancePreferences);
+        desktop.SetTrayAppearance(appearance.State);
+        appearance.Changed += desktop.SetTrayAppearance;
         appearance.Track(capture, SurfaceMaterial.Capture);
         appearance.Track(warning, SurfaceMaterial.Warning);
         appearance.Track(preview, SurfaceMaterial.Break);

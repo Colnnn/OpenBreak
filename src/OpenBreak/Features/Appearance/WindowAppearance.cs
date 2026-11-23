@@ -40,6 +40,7 @@ internal sealed class WindowAppearance : IDisposable
     }
 
     internal AppearanceState State => current;
+    internal event Action<AppearanceState>? Changed;
 
     internal void Apply(AppearancePreferences settings)
     {
@@ -163,6 +164,7 @@ internal sealed class WindowAppearance : IDisposable
         {
             apply(current);
         }
+        Changed?.Invoke(current);
     }
 
     private AppearanceState ReadState() => AppearancePolicy.Resolve(preferences, new AppearanceSystem(

@@ -15,10 +15,10 @@ internal sealed partial class TaskStore(string path)
 {
     internal const int TitleLimit = 140;
     internal const int NextStepLimit = 480;
-    // Keep the original on-disk identity and schema so existing tasks and settings open in place.
+    // Keep the original on-disk identity so existing tasks and settings open in place.
     private const string UserDataDirectory = "Afterbreak";
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 9;
+    private const int SchemaVersion = 10;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static string CurrentUserDatabasePath => Path.Combine(
@@ -276,11 +276,15 @@ internal sealed partial class TaskStore(string path)
                 {
                     ReadReminders(connection, transaction);
                 }
+                if (version >= 9)
+                {
+                    ReadFloatingTimerPosition(connection, transaction);
+                }
                 using var migration = Command(connection, transaction, $"""
                     {(version == 1 ? ReminderTable : "")}
                     {(version <= 2 ? CaptureTable : "")}
                     {(version <= 3 ? AppearanceTable : "")}
-                    {FloatingTimerPlacementTable}
+                    {(version < 9 ? FloatingTimerPlacementTable : "")}
                     PRAGMA user_version = {SchemaVersion};
                     """);
                 migration.ExecuteNonQuery();

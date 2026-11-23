@@ -37,16 +37,23 @@ internal static class CountdownChecks
             "default appearance leaves the tray logo and creates no floating timer");
         host.Navigate(ManagementPage.Appearance);
         var form = AppearanceSettingsPage.Current;
+        Check(form.Save(AppearancePreferences.Default with { Theme = AppearanceTheme.Light }) &&
+            tray.Countdown is null && tray.TrayAppearance.Theme == AppearanceTheme.Light,
+            "appearance updates the idle tray design with the numeric display disabled");
         var trayOnly = AppearancePreferences.Default with { TrayCountdown = true };
         Check(form.Save(trayOnly) && tray.Countdown is { Glyphs: "3", Time: "02:05" } && FloatingTimerWindow.Current is null,
             "the tray countdown can be enabled independently");
         var floatingOnly = AppearancePreferences.Default with { FloatingTimer = true, FloatingTimerOnTop = true };
         Check(form.Save(floatingOnly) && tray.Countdown is null && FloatingTimerWindow.Current is
-            { IsVisible: true, KeepOnTop: true, Display.Time: "02:05" } floating && tray.FloatingTimerHandle == floating.Handle,
+            { IsVisible: true, KeepOnTop: true, Display.Time: "02:05", Style: FloatingTimerStyle.Standard } floating &&
+            tray.FloatingTimerHandle == floating.Handle,
             "the floating countdown and keep-on-top can be enabled independently of the tray");
 
         var timer = FloatingTimerWindow.Current!;
-        Check(form.Save(floatingOnly with { TrayCountdown = true }), "both countdowns can be enabled together");
+        var compact = floatingOnly with { TrayCountdown = true, TimerStyle = FloatingTimerStyle.Compact };
+        Check(form.Save(compact) && FloatingTimerWindow.Current == timer &&
+            timer is { IsVisible: true, KeepOnTop: true, Style: FloatingTimerStyle.Compact },
+            "saving compact appearance updates the existing timer with both countdowns enabled");
         host.Navigate(ManagementPage.Focus);
         Tick(65);
         Check(tray.Countdown is { Glyphs: "1", Time: "01:00", FinalMinute: false } &&
@@ -117,8 +124,8 @@ internal static class CountdownChecks
         Check(timer.Closed && !queue.Timers[1].IsRunning, "quit closes floating and stops the existing scheduler timer");
 
         _ = new OpenBreakSession(new DispatcherQueue(), () => { }, store, clock);
-        Check(FloatingTimerWindow.Current is { OriginalPosition: { } loaded, IsVisible: true } && loaded == position,
-            "startup restores drag placement and the persisted floating opt-in");
+        Check(FloatingTimerWindow.Current is { OriginalPosition: { } loaded, IsVisible: true, Style: FloatingTimerStyle.Compact } &&
+            loaded == position, "startup restores compact style, drag placement and the persisted floating opt-in");
         Desktop.Current.Send(TrayCommand.Quit);
     }
 
@@ -138,21 +145,33 @@ internal static class CountdownChecks
             var plain = TrayCountdownIcon.Rasterize(normal);
             var marked = TrayCountdownIcon.Rasterize(normal with { FinalMinute = true });
             var overflow = TrayCountdownIcon.Rasterize(normal with { Glyphs = "99+" });
-            var inset = Math.Max(1, size / 12);
-            var marker = (size - 2 * inset) * size + size / 2;
-            Check(plain.Length == size * size && plain[marker] != -1 && marked[marker] == -1 &&
-                overflow.Contains(-1) && plain[0] == 0 && marked[^1] == 0,
-                $"tray raster preserves final-minute underline and large-duration glyphs at {size} pixels");
+            var pause = TrayCountdownIcon.Rasterize(normal with { Glyphs = "II" });
+            var logo = TrayCountdownIcon.Rasterize(normal with { Glyphs = null });
+            var underline = (int)Math.Floor(size * (8 + 5.3) / 16) * size + size / 2;
+            Check(plain.Length == size * size && (plain[underline] & 0xff) == 0 &&
+                (marked[underline] & 0xff) > 160 && overflow.Any(pixel => (pixel & 0xff) > 160) &&
+                plain[0] == 0 && marked[^1] == 0 && !pause.SequenceEqual(logo) &&
+                logo.Any(pixel => pixel >>> 24 is > 0 and < 255) &&
+                plain.Any(pixel => pixel >>> 24 == 255 && (pixel & 0xff) is > 0 and < 255),
+                $"antialiased tray art distinguishes logo, pause, final minute and overflow at {size} pixels");
         }
+        var contrast = AppearancePolicy.Resolve(AppearancePreferences.Default with { Theme = AppearanceTheme.Dark },
+            new AppearanceSystem(true, false, false, 1, 0x123456, 0xFEDCBA));
+        Check(TrayIconDesign.For(null, contrast) is { Glyphs: null, Background: 0x123456, Ink: 0xFEDCBA } &&
+            TrayIconDesign.For(new CountdownDisplay("Short break", "00:15", "15", true), contrast) is
+            { Glyphs: "15", FinalMinute: true, Background: 0x123456, Ink: 0xFEDCBA },
+            "contrast colors apply to the idle artwork and final countdown without removing the underline");
     }
 
     private static void CheckIconOwnership()
     {
         List<nint> destroyed = [];
         var next = 20;
-        using var lifetime = new TrayIconLifetime(10, _ => next++, destroyed.Add);
+        var canDraw = false;
+        using var lifetime = new TrayIconLifetime(10, _ => canDraw ? next++ : 0, destroyed.Add);
         var a = new TrayIconDesign("2", false, 16, 0, 0xFFFFFF);
         var b = a with { Glyphs = "1" };
+        var logo = a with { Glyphs = null };
         var calls = new List<(nint Icon, string Tip, bool IconChanged, bool TipChanged)>();
         var shellAccepts = true;
         bool Publish(nint icon, string tip, bool iconChanged, bool tipChanged)
@@ -161,23 +180,43 @@ internal static class CountdownChecks
             return shellAccepts;
         }
 
-        Check(lifetime.Apply(null, "Shortcut", true, Publish) && calls is [(10, "Shortcut", true, true)],
-            "initial registration uses the shared logo");
+        Check(lifetime.Apply(logo, "Shortcut", true, Publish) && calls is [(10, "Shortcut", true, true)],
+            "initial draw failure registers the borrowed fallback icon");
+        canDraw = true;
+        Check(lifetime.Apply(logo, "Shortcut", false, Publish) && calls[^1] == (20, "Shortcut", true, false),
+            "the original owned icon replaces the fallback on the next successful draw");
         Check(lifetime.Apply(a, "01:51", false, Publish) && lifetime.Apply(a, "01:51", false, Publish) &&
-            lifetime.Apply(a, "01:50", false, Publish) && calls.Count == 3 && calls[^1] == (20, "01:50", false, true) && next == 21,
+            lifetime.Apply(a, "01:50", false, Publish) && calls.Count == 4 && calls[^1] == (21, "01:50", false, true) &&
+            next == 22 && destroyed.SequenceEqual([(nint)20]),
             "unchanged output issues no shell call and a seconds-only tooltip change reuses the minute HICON");
+        canDraw = false;
+        Check(lifetime.Apply(b, "01:00", false, Publish) && calls[^1] == (21, "01:00", false, true) &&
+            destroyed.Count == 1, "a failed draw keeps the prior HICON and publishes the exact tooltip");
+        canDraw = true;
         shellAccepts = false;
-        Check(!lifetime.Apply(b, "01:00", false, Publish) && destroyed.SequenceEqual([(nint)21]),
+        Check(!lifetime.Apply(b, "01:00", false, Publish) && destroyed.SequenceEqual([(nint)20, 22]),
             "failed icon replacement discards the new handle and retains the published handle");
-        Check(!lifetime.Apply(a, "01:50", true, Publish) && calls[^1] == (20, "01:50", true, true) &&
-            destroyed.Count == 1, "a failed Explorer re-add preserves the current HICON for the retry");
+        Check(!lifetime.Apply(a, "01:50", true, Publish) && calls[^1] == (21, "01:50", true, true) &&
+            destroyed.Count == 2, "a failed Explorer re-add preserves the current HICON for the retry");
         shellAccepts = true;
-        Check(lifetime.Apply(a, "01:50", true, Publish) && calls[^1] == (20, "01:50", true, true) && next == 22,
+        Check(lifetime.Apply(a, "01:50", true, Publish) && calls[^1] == (21, "01:50", true, true) && next == 23,
             "retrying after Explorer restart republishes the current icon and tooltip without rasterizing");
-        Check(lifetime.Apply(b, "01:00", false, Publish) && destroyed.SequenceEqual([(nint)21, 20]),
-            "a successful icon replacement releases the previous owned handle");
+        Check(lifetime.Apply(b, "01:00", false, Publish) && destroyed.SequenceEqual([(nint)20, 22, 21]) &&
+            lifetime.Apply(logo with { Size = 24 }, "Shortcut", false, Publish) && calls[^1] == (24, "Shortcut", true, true),
+            "returning to the DPI-sized original mark releases the previous countdown HICON");
+        Check(lifetime.Apply(b, "01:00", false, Publish), "restores numeric icon for idle draw failure check");
+        canDraw = shellAccepts = false;
+        Check(!lifetime.Apply(logo, "Reminders off", false, Publish) && !destroyed.Contains((nint)25),
+            "a failed fallback publication retains the previous numeric icon for retry");
+        shellAccepts = true;
+        Check(lifetime.Apply(logo, "Reminders off", false, Publish) && calls[^1] == (10, "Reminders off", true, true) &&
+            destroyed.Contains((nint)25), "an idle draw failure retires stale numbers and publishes the fallback");
+        canDraw = true;
+        Check(lifetime.Apply(logo, "Reminders off", false, Publish) && calls[^1] == (26, "Reminders off", true, false),
+            "the next refresh retries the original mark even with an unchanged tooltip");
         lifetime.Dispose();
-        Check(destroyed.SequenceEqual([(nint)21, 20, 22]), "dispose releases the final owned handle without destroying the shared logo");
+        Check(destroyed.SequenceEqual([(nint)20, 22, 21, 23, 24, 25, 26]),
+            "dispose releases the final owned handle and leaves the borrowed fallback intact");
     }
 
     private static void Check(bool condition, string message)

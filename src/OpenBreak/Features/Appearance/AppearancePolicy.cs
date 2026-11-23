@@ -3,14 +3,17 @@ namespace OpenBreak;
 internal enum AppearanceTheme { System, Light, Dark }
 internal enum BreakScene { Dusk, Daylight }
 internal enum SceneMotion { FollowWindows, Off }
+internal enum FloatingTimerStyle { Standard, Compact }
 internal enum SurfaceMaterial { Mica, Capture, Warning, Break, Tray, FloatingTimer }
 
 internal sealed record AppearancePreferences(AppearanceTheme Theme, BreakScene Scene,
     SceneMotion Motion = SceneMotion.FollowWindows, bool BreakStartSound = false,
-    bool TrayCountdown = false, bool FloatingTimer = false, bool FloatingTimerOnTop = false)
+    bool TrayCountdown = false, bool FloatingTimer = false, bool FloatingTimerOnTop = false,
+    FloatingTimerStyle TimerStyle = FloatingTimerStyle.Standard)
 {
     internal static AppearancePreferences Default { get; } = new(AppearanceTheme.System, BreakScene.Dusk);
-    internal bool IsValid => Enum.IsDefined(Theme) && Enum.IsDefined(Scene) && Enum.IsDefined(Motion);
+    internal bool IsValid => Enum.IsDefined(Theme) && Enum.IsDefined(Scene) && Enum.IsDefined(Motion) &&
+        Enum.IsDefined(TimerStyle);
 }
 
 internal readonly record struct AppearanceSystem(bool HighContrast, bool Transparency, bool Animations,
@@ -18,7 +21,7 @@ internal readonly record struct AppearanceSystem(bool HighContrast, bool Transpa
 
 internal readonly record struct AppearanceState(AppearanceTheme Theme, BreakScene Scene, bool HighContrast,
     bool UseMaterials, bool WindowsAnimations, double TextScale, uint WindowColor, uint TextColor,
-    SceneMotion Motion = SceneMotion.FollowWindows)
+    SceneMotion Motion = SceneMotion.FollowWindows, FloatingTimerStyle TimerStyle = FloatingTimerStyle.Standard)
 {
     internal bool ShowScene => !HighContrast;
     internal bool AnimateScene => WindowsAnimations && !HighContrast && Motion == SceneMotion.FollowWindows;
@@ -36,6 +39,6 @@ internal static class AppearancePolicy
         var scale = double.IsFinite(system.TextScale) ? Math.Clamp(system.TextScale, 1, 2.25) : 1;
         return new AppearanceState(system.HighContrast ? AppearanceTheme.System : preferences.Theme, preferences.Scene,
             system.HighContrast, system.Transparency && !system.HighContrast, system.Animations,
-            scale, system.WindowColor, system.TextColor, preferences.Motion);
+            scale, system.WindowColor, system.TextColor, preferences.Motion, preferences.TimerStyle);
     }
 }

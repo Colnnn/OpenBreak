@@ -9,6 +9,7 @@ internal sealed partial class TaskStore
     private const string TrayCountdownColumn = "tray_countdown INTEGER NOT NULL DEFAULT 0 CHECK (tray_countdown IN (0, 1))";
     private const string FloatingTimerColumn = "floating_timer INTEGER NOT NULL DEFAULT 0 CHECK (floating_timer IN (0, 1))";
     private const string FloatingOnTopColumn = "floating_on_top INTEGER NOT NULL DEFAULT 0 CHECK (floating_on_top IN (0, 1))";
+    private const string FloatingTimerStyleColumn = "floating_timer_style TEXT NOT NULL DEFAULT 'Standard' CHECK (floating_timer_style IN ('Standard', 'Compact'))";
     private const string AppearanceTable = $"""
         CREATE TABLE appearance_preferences (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -18,7 +19,8 @@ internal sealed partial class TaskStore
             {BreakSoundColumn},
             {TrayCountdownColumn},
             {FloatingTimerColumn},
-            {FloatingOnTopColumn}
+            {FloatingOnTopColumn},
+            {FloatingTimerStyleColumn}
         ) STRICT;
         """;
 
@@ -31,7 +33,8 @@ internal sealed partial class TaskStore
     private static AppearancePreferences? ReadAppearance(SqliteConnection connection, SqliteTransaction? transaction)
     {
         using var command = Command(connection, transaction, """
-            SELECT id, theme, scene, scene_motion, break_start_sound, tray_countdown, floating_timer, floating_on_top
+            SELECT id, theme, scene, scene_motion, break_start_sound, tray_countdown, floating_timer, floating_on_top,
+                floating_timer_style
             FROM appearance_preferences
             """);
         using var reader = command.ExecuteReader();
@@ -46,12 +49,14 @@ internal sealed partial class TaskStore
             !TryReadFlag(reader.GetValue(4), out var sound) ||
             !TryReadFlag(reader.GetValue(5), out var trayCountdown) ||
             !TryReadFlag(reader.GetValue(6), out var floatingTimer) ||
-            !TryReadFlag(reader.GetValue(7), out var floatingOnTop) || reader.Read())
+            !TryReadFlag(reader.GetValue(7), out var floatingOnTop) ||
+            reader.GetValue(8) is not string styleName || !TryReadEnum(styleName, out FloatingTimerStyle style) ||
+            reader.Read())
         {
             throw new InvalidDataException("The saved appearance preferences are invalid.");
         }
 
-        return new AppearancePreferences(theme, scene, motion, sound, trayCountdown, floatingTimer, floatingOnTop);
+        return new AppearancePreferences(theme, scene, motion, sound, trayCountdown, floatingTimer, floatingOnTop, style);
     }
 
     private static bool TryReadFlag(object value, out bool enabled)
@@ -71,9 +76,13 @@ internal sealed partial class TaskStore
             AddAppearanceColumn(SceneMotionColumn);
             AddAppearanceColumn(BreakSoundColumn);
         }
-        AddAppearanceColumn(TrayCountdownColumn);
-        AddAppearanceColumn(FloatingTimerColumn);
-        AddAppearanceColumn(FloatingOnTopColumn);
+        if (version < 9)
+        {
+            AddAppearanceColumn(TrayCountdownColumn);
+            AddAppearanceColumn(FloatingTimerColumn);
+            AddAppearanceColumn(FloatingOnTopColumn);
+        }
+        AddAppearanceColumn(FloatingTimerStyleColumn);
         ReadAppearance(connection, transaction);
 
         void AddAppearanceColumn(string column)
@@ -94,16 +103,17 @@ internal sealed partial class TaskStore
         using var transaction = connection.BeginTransaction();
         using var command = Command(connection, transaction, """
             INSERT INTO appearance_preferences
-                (id, theme, scene, scene_motion, break_start_sound, tray_countdown, floating_timer, floating_on_top)
-            VALUES (1, $theme, $scene, $motion, $sound, $tray, $floating, $top)
+                (id, theme, scene, scene_motion, break_start_sound, tray_countdown, floating_timer, floating_on_top,
+                 floating_timer_style)
+            VALUES (1, $theme, $scene, $motion, $sound, $tray, $floating, $top, $style)
             ON CONFLICT (id) DO UPDATE SET theme = excluded.theme, scene = excluded.scene,
                 scene_motion = excluded.scene_motion, break_start_sound = excluded.break_start_sound,
                 tray_countdown = excluded.tray_countdown, floating_timer = excluded.floating_timer,
-                floating_on_top = excluded.floating_on_top
+                floating_on_top = excluded.floating_on_top, floating_timer_style = excluded.floating_timer_style
             """, ("$theme", preferences.Theme.ToString()), ("$scene", preferences.Scene.ToString()),
             ("$motion", preferences.Motion.ToString()), ("$sound", preferences.BreakStartSound ? 1 : 0),
             ("$tray", preferences.TrayCountdown ? 1 : 0), ("$floating", preferences.FloatingTimer ? 1 : 0),
-            ("$top", preferences.FloatingTimerOnTop ? 1 : 0));
+            ("$top", preferences.FloatingTimerOnTop ? 1 : 0), ("$style", preferences.TimerStyle.ToString()));
         if (command.ExecuteNonQuery() != 1 || ReadAppearance(connection, transaction) != preferences)
         {
             throw new InvalidDataException("The appearance preferences could not be saved.");

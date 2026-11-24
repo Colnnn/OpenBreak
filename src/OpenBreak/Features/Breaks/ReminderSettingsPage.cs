@@ -13,6 +13,7 @@ internal sealed class ReminderSettingsPage : UserControl
     private readonly ToggleSwitch enabled = new() { Header = "Scheduled reminders" };
     private readonly ToggleSwitch hours = new() { Header = "Limit reminders to working hours" };
     private readonly ToggleSwitch longBreaks = new() { Header = "Long breaks" };
+    private readonly ToggleSwitch finishTyping = new() { Header = "Finish typing before a break" };
     private readonly ComboBox breakDisplay = CreateBreakDisplaySelector();
     private readonly DurationEditor work = new("Work interval", 1440);
     private readonly DurationEditor shortBreak = new("Short break", 60);
@@ -40,6 +41,10 @@ internal sealed class ReminderSettingsPage : UserControl
         rhythmHint.TextWrapping = TextWrapping.Wrap;
         var privacy = SurfaceStyle.SecondaryLabel("Pause for presentation from the tray whenever you share your screen.", SurfaceStyle.Body);
         privacy.TextWrapping = TextWrapping.Wrap;
+        var inputHint = SurfaceStyle.SecondaryLabel(
+            "Hold the final warning second until 3 seconds without keyboard or mouse input.", SurfaceStyle.Body);
+        inputHint.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHelpText(finishTyping, inputHint.Text);
         status.TextWrapping = TextWrapping.Wrap;
         AddPair(firstDurations, work, shortBreak, 560);
         AddPair(secondDurations, longBreak, cadence, 560);
@@ -67,9 +72,11 @@ internal sealed class ReminderSettingsPage : UserControl
         form.Children.Add(rhythmHint);
         form.Children.Add(hours);
         form.Children.Add(times);
-        form.Children.Add(Heading("During a break", SurfaceStyle.SectionTitle));
+        form.Children.Add(Heading("Break warnings and display", SurfaceStyle.SectionTitle));
         form.Children.Add(breakDisplay);
         form.Children.Add(snooze);
+        form.Children.Add(finishTyping);
+        form.Children.Add(inputHint);
         form.Children.Add(privacy);
 
         var root = new Grid();
@@ -175,6 +182,7 @@ internal sealed class ReminderSettingsPage : UserControl
         longBreak.SetSeconds(settings.LongSeconds);
         snooze.SetSeconds(settings.SnoozeSeconds);
         longBreaks.IsOn = settings.LongBreaks;
+        finishTyping.IsOn = settings.FinishTyping;
         cadence.Text = settings.ShortsBeforeLong.ToString();
         breakDisplay.SelectedIndex = (int)settings.BreakDisplay;
         error.Message = "Reminder settings are unavailable. Return to Breaks to retry loading your settings.";
@@ -257,6 +265,7 @@ internal sealed class ReminderSettingsPage : UserControl
             LongBreaks = longBreaks.IsOn,
             ShortsBeforeLong = shortsBeforeLong,
             SnoozeSeconds = snoozeSeconds,
+            FinishTyping = finishTyping.IsOn,
         };
     }
 

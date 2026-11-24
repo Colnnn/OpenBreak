@@ -13,6 +13,7 @@
     <Compile Include="../../src/OpenBreak/Features/Capture/CaptureShortcuts.cs" Link="CaptureShortcuts.cs" />
     <Compile Include="../../src/OpenBreak/Storage/CaptureStorage.cs" Link="CaptureStorage.cs" />
     <Compile Include="../../src/OpenBreak/Scheduling/ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/InputQuietPeriod.cs" Link="InputQuietPeriod.cs" />
     <Compile Include="../../src/OpenBreak/Storage/ReminderStorage.cs" Link="ReminderStorage.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
   </ItemGroup>

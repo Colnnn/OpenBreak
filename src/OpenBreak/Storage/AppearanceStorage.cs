@@ -82,7 +82,10 @@ internal sealed partial class TaskStore
             AddAppearanceColumn(FloatingTimerColumn);
             AddAppearanceColumn(FloatingOnTopColumn);
         }
-        AddAppearanceColumn(FloatingTimerStyleColumn);
+        if (version < 10)
+        {
+            AddAppearanceColumn(FloatingTimerStyleColumn);
+        }
         ReadAppearance(connection, transaction);
 
         void AddAppearanceColumn(string column)

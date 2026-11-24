@@ -16,6 +16,8 @@
     <Compile Include="../../src/OpenBreak/Features/Breaks/BreakView.cs" Link="BreakView.cs" />
     <Compile Include="../../src/OpenBreak/Features/Breaks/BreakDiagnostics.cs" Link="BreakDiagnostics.cs" />
     <Compile Include="../../src/OpenBreak/Scheduling/ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/InputQuietPeriod.cs" Link="InputQuietPeriod.cs" />
+    <Compile Include="../../src/OpenBreak/Platform/LastInputActivity.cs" Link="LastInputActivity.cs" />
     <Compile Include="../../src/OpenBreak/Storage/ReminderStorage.cs" Link="ReminderStorage.cs" />
     <Compile Include="../../src/OpenBreak/Storage/TaskStore.cs" Link="TaskStore.cs" />
     <Compile Include="../../src/OpenBreak/Features/Appearance/AppearancePolicy.cs" Link="AppearancePolicy.cs" />

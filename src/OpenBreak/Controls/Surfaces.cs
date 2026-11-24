@@ -385,9 +385,10 @@ internal sealed class WarningWindow : Window
         }
     }
 
-    internal void Update(int seconds)
+    internal void Update(int seconds, bool holdingForInput = false)
     {
-        var label = seconds == 1 ? "Break in 1 second" : $"Break in {seconds} seconds";
+        var label = holdingForInput ? "Break in 1 second · waiting" :
+            seconds == 1 ? "Break in 1 second" : $"Break in {seconds} seconds";
         if (title.Text != label)
         {
             title.Text = label;
@@ -571,10 +572,15 @@ internal sealed class BreakWindow : Window
         return shellFullscreenExcluded;
     }
 
-    internal bool TryShow(nint source)
+    internal bool TryShow(nint source, Func<bool>? canShow = null)
     {
         if (!TryPrepareToShow(source))
         {
+            return false;
+        }
+        if (canShow is not null && !canShow())
+        {
+            ClearShellFullscreenExclusion();
             return false;
         }
         SurfaceWindow.ShowAndActivate(this);

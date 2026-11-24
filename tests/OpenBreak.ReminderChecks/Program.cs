@@ -17,6 +17,8 @@ internal static class Program
         Restart();
         ExplicitWorkPause();
         ConfigurableRhythm();
+        InputQuietPeriodChecks.Run();
+        WarningInputChecks.Run();
     }
 
     private static void CadenceAndSnooze()

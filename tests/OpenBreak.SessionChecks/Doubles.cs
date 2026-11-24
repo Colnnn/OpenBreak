@@ -220,6 +220,7 @@ namespace OpenBreak
         public string? SaveError { get; private set; }
         public void ShowSaveError(string message) => SaveError = message;
         public int SnoozeSeconds { get; private set; } = ReminderSettings.DefaultSnoozeSeconds;
+        public bool HoldingForInput { get; private set; }
         public void SetSnoozeDuration(int seconds) => SnoozeSeconds = seconds;
 
         public bool TryShow(nint source, string? breakKind = null)
@@ -241,6 +242,7 @@ namespace OpenBreak
             }
             LastSource = source;
             Seconds = 10;
+            HoldingForInput = false;
             Kind = breakKind;
             SaveError = null;
             PlacementIsCurrent = true;
@@ -256,7 +258,7 @@ namespace OpenBreak
             }
         }
 
-        public void Update(int seconds) => Seconds = seconds;
+        public void Update(int seconds, bool holdingForInput = false) => (Seconds, HoldingForInput) = (seconds, holdingForInput);
         public string DescribePlacement() => $"visible={IsVisible} areaMatches={PlacementIsCurrent}";
     }
 
@@ -305,7 +307,7 @@ namespace OpenBreak
             Seconds = 10;
         }
 
-        public bool TryShow(nint source)
+        public bool TryShow(nint source, Func<bool>? canShow = null)
         {
             BeforeShow?.Invoke();
             Attempts++;
@@ -313,8 +315,13 @@ namespace OpenBreak
             {
                 return false;
             }
-            Shows++;
             ShellFullscreenExcluded = true;
+            if (canShow is not null && !canShow())
+            {
+                ShellFullscreenExcluded = false;
+                return false;
+            }
+            Shows++;
             IsVisible = true;
             RetainedDisplayAvailable = true;
             return true;
@@ -484,6 +491,7 @@ namespace OpenBreak
         public bool IsDirty => Draft != LoadedSettings;
 
         public void SetForm(ReminderSettings settings, bool storageError) => LoadedSettings = Draft = settings;
+        public void Discard() => Draft = LoadedSettings;
         public void RebaseBreakDisplay(BreakDisplay display)
         {
             if (Draft.BreakDisplay == LoadedSettings.BreakDisplay)

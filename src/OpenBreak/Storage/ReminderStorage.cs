@@ -28,13 +28,15 @@ internal sealed partial class TaskStore
     };
 
     private const string WorkPauseColumn = "work_paused INTEGER NOT NULL DEFAULT 0 CHECK (work_paused IN (0, 1))";
+    private const string FinishTypingColumn = "finish_typing INTEGER NOT NULL DEFAULT 0 CHECK (finish_typing IN (0, 1))";
 
     private const string ReminderTable = $"""
         CREATE TABLE reminder_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             settings TEXT NOT NULL,
             checkpoint TEXT NOT NULL,
-            {WorkPauseColumn}
+            {WorkPauseColumn},
+            {FinishTypingColumn}
         ) STRICT;
         """;
 
@@ -48,7 +50,8 @@ internal sealed partial class TaskStore
         SqliteConnection connection, SqliteTransaction? transaction, long version = SchemaVersion)
     {
         using var query = Command(connection, transaction,
-            $"SELECT id, settings, checkpoint, {(version < 6 ? "0" : "work_paused")} FROM reminder_state");
+            $"SELECT id, settings, checkpoint, {(version < 6 ? "0" : "work_paused")}, " +
+            $"{(version < 11 ? "0" : "finish_typing")} FROM reminder_state");
         using var reader = query.ExecuteReader();
         if (!reader.Read())
         {
@@ -57,16 +60,16 @@ internal sealed partial class TaskStore
 
         if (reader.GetValue(0) is not 1L || reader.GetValue(1) is not string settingsJson ||
             reader.GetValue(2) is not string checkpointJson || reader.GetValue(3) is not long workPaused ||
-            workPaused is not (0 or 1))
+            workPaused is not (0 or 1) || reader.GetValue(4) is not long finishTyping || finishTyping is not (0 or 1))
         {
             throw new InvalidDataException("The saved reminder row is invalid.");
         }
-        var settings = version switch
+        var settings = (version switch
         {
             <= 4 => ReadReminderJson<LegacyDisplaySettings>(settingsJson).Upgrade(),
             <= 6 => ReadReminderJson<LegacyRhythmSettings>(settingsJson).Upgrade(),
             _ => ReadReminderJson<ReminderSettings>(settingsJson),
-        };
+        }) with { FinishTyping = finishTyping == 1 };
         var checkpoint = ReadReminderJson<ReminderCheckpoint>(checkpointJson) with { WorkPaused = workPaused == 1 };
         ValidateReminderState(settings, checkpoint, version <= 6);
         if (reader.Read())
@@ -98,7 +101,7 @@ internal sealed partial class TaskStore
                 ("$paused", initialCheckpoint.WorkPaused))
             : Command(connection, transaction, "UPDATE reminder_state SET settings = $settings WHERE id = 1",
                 ("$settings", settingsJson));
-        if (save.ExecuteNonQuery() != 1)
+        if (save.ExecuteNonQuery() != 1 || ReadReminders(connection, transaction) != (settings, activeCheckpoint))
         {
             throw new InvalidDataException("The break display could not be saved.");
         }
@@ -137,19 +140,24 @@ internal sealed partial class TaskStore
     private static void MigrateReminderSettings(SqliteConnection connection, SqliteTransaction transaction, long version)
     {
         var (settings, checkpoint) = ReadReminders(connection, transaction, version);
+        using var addFinishTyping = Command(connection, transaction, $"ALTER TABLE reminder_state ADD COLUMN {FinishTypingColumn}");
+        addFinishTyping.ExecuteNonQuery();
         if (version < 6)
         {
             using var add = Command(connection, transaction, $"ALTER TABLE reminder_state ADD COLUMN {WorkPauseColumn}");
             add.ExecuteNonQuery();
         }
-        if (checkpoint is null)
+        if (version < 7 && checkpoint is not null)
         {
-            return;
+            using var update = Command(connection, transaction, "UPDATE reminder_state SET settings = $settings WHERE id = 1",
+                ("$settings", JsonSerializer.Serialize(settings, ReminderJson)));
+            if (update.ExecuteNonQuery() != 1)
+            {
+                throw new InvalidDataException("The saved reminder settings could not be migrated.");
+            }
         }
 
-        using var update = Command(connection, transaction, "UPDATE reminder_state SET settings = $settings WHERE id = 1",
-            ("$settings", JsonSerializer.Serialize(settings, ReminderJson)));
-        if (update.ExecuteNonQuery() != 1 || ReadReminders(connection, transaction) != (settings, checkpoint))
+        if (ReadReminders(connection, transaction) != (settings, checkpoint))
         {
             throw new InvalidDataException("The saved reminder settings could not be migrated.");
         }
@@ -161,11 +169,14 @@ internal sealed partial class TaskStore
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         using var save = Command(connection, transaction, """
-            INSERT INTO reminder_state (id, settings, checkpoint, work_paused) VALUES (1, $settings, $checkpoint, $paused)
-            ON CONFLICT (id) DO UPDATE SET settings = excluded.settings, checkpoint = excluded.checkpoint, work_paused = excluded.work_paused
+            INSERT INTO reminder_state (id, settings, checkpoint, work_paused, finish_typing)
+            VALUES (1, $settings, $checkpoint, $paused, $finishTyping)
+            ON CONFLICT (id) DO UPDATE SET settings = excluded.settings, checkpoint = excluded.checkpoint,
+                work_paused = excluded.work_paused, finish_typing = excluded.finish_typing
             """, ("$settings", JsonSerializer.Serialize(settings, ReminderJson)),
-            ("$checkpoint", JsonSerializer.Serialize(checkpoint, ReminderJson)), ("$paused", checkpoint.WorkPaused));
-        if (save.ExecuteNonQuery() != 1)
+            ("$checkpoint", JsonSerializer.Serialize(checkpoint, ReminderJson)), ("$paused", checkpoint.WorkPaused),
+            ("$finishTyping", settings.FinishTyping));
+        if (save.ExecuteNonQuery() != 1 || ReadReminders(connection, transaction) != (settings, checkpoint))
         {
             throw new InvalidDataException("The reminder settings could not be saved.");
         }

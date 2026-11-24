@@ -31,6 +31,8 @@ internal sealed record ReminderSettings(bool Enabled, int WorkSeconds, int Short
     [JsonRequired]
     public int SnoozeSeconds { get; init; } = DefaultSnoozeSeconds;
 
+    internal bool FinishTyping { get; init; }
+
     internal bool IsValid => WorkSeconds is >= 5 and <= 86400 && ShortSeconds is >= 1 and <= 3600 &&
         LongSeconds is >= 1 and <= 3600 && StartMinute is >= 0 and < 1440 && EndMinute is >= 0 and < 1440 &&
         (!WorkingHours || StartMinute != EndMinute) && Enum.IsDefined(BreakDisplay) &&
@@ -91,6 +93,7 @@ internal sealed class ReminderScheduler
     private DateOnly? workingWindow;
     private TimeSpan away;
     private TimeSpan? interruptedBreak;
+    private InputQuietPeriod inputQuietPeriod;
 
     internal ReminderScheduler(TimeProvider clock, ReminderSettings settings, ReminderCheckpoint? saved = null)
     {
@@ -133,11 +136,12 @@ internal sealed class ReminderScheduler
     internal TimeSpan Remaining { get; private set; }
     internal bool ManuallyPaused { get; private set; }
     internal bool WorkPaused => (PausedBy & ReminderPause.Work) != 0;
+    internal bool HoldingForInput { get; private set; }
     internal int CompletedShorts { get; private set; }
     internal bool IsLongBreak => Settings.IsLongBreak(CompletedShorts);
     private TimeSpan BreakLength => Settings.BreakLength(CompletedShorts);
 
-    internal void Update(ReminderPause environment)
+    internal void Update(ReminderPause environment, Func<LastInputSample?>? readLastInput = null, bool stagingBreak = false)
     {
         var now = clock.GetTimestamp();
         var elapsed = clock.GetElapsedTime(lastTick, now);
@@ -173,12 +177,19 @@ internal sealed class ReminderScheduler
         {
             away += elapsed;
         }
-        else if (PausedBy == ReminderPause.None)
+        else if (PausedBy == ReminderPause.None && !stagingBreak)
         {
-            Remaining -= elapsed;
-            if (Remaining < TimeSpan.Zero)
+            var wasHolding = HoldingForInput;
+            HoldingForInput = pauses == ReminderPause.None && Phase == ReminderPhase.Warning && Settings.FinishTyping &&
+                readLastInput is not null && InputQuietPeriod.IsFinalSecond(Remaining, elapsed) &&
+                inputQuietPeriod.ShouldHold(clock, now, readLastInput());
+            if (HoldingForInput)
             {
-                Remaining = TimeSpan.Zero;
+                Remaining = InputQuietPeriod.FinalSecond;
+            }
+            else if (!wasHolding)
+            {
+                Remaining = elapsed >= Remaining ? TimeSpan.Zero : Remaining - elapsed;
             }
         }
         PausedBy = pauses;
@@ -261,6 +272,29 @@ internal sealed class ReminderScheduler
 
     internal void StartVisibleCountdown() => lastTick = clock.GetTimestamp();
 
+    internal bool HoldBeforeBreak(Func<LastInputSample?> readLastInput)
+    {
+        if (Phase != ReminderPhase.Break || PausedBy != ReminderPause.None || !Settings.FinishTyping)
+        {
+            return false;
+        }
+
+        var input = readLastInput();
+        var now = clock.GetTimestamp();
+        if (!inputQuietPeriod.ShouldHold(clock, now, input))
+        {
+            inputQuietPeriod = default;
+            return false;
+        }
+
+        interruptedBreak = Remaining;
+        Phase = ReminderPhase.Warning;
+        Remaining = InputQuietPeriod.FinalSecond;
+        lastTick = now;
+        HoldingForInput = true;
+        return true;
+    }
+
     internal ReminderScheduler WithSettings(ReminderSettings settings)
     {
         var candidate = Copy();
@@ -272,7 +306,17 @@ internal sealed class ReminderScheduler
     {
         var old = Settings;
         Settings = settings;
-        if (old with { BreakDisplay = settings.BreakDisplay, SnoozeSeconds = settings.SnoozeSeconds } == settings)
+        if (old.FinishTyping != settings.FinishTyping)
+        {
+            inputQuietPeriod = default;
+            if (HoldingForInput)
+            {
+                HoldingForInput = false;
+                StartVisibleCountdown();
+            }
+        }
+        if (old with { BreakDisplay = settings.BreakDisplay, SnoozeSeconds = settings.SnoozeSeconds,
+            FinishTyping = settings.FinishTyping } == settings)
         {
             return;
         }
@@ -315,6 +359,11 @@ internal sealed class ReminderScheduler
 
     private void Start(ReminderPhase phase, TimeSpan remaining)
     {
+        HoldingForInput = false;
+        if (phase != ReminderPhase.Break)
+        {
+            inputQuietPeriod = default;
+        }
         Phase = phase;
         Remaining = remaining;
         lastTick = clock.GetTimestamp();

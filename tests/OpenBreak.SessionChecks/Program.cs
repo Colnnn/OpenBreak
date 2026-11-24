@@ -15,6 +15,7 @@ internal static class Program
             CheckSession(Path.Combine(temporary.FullName, "tasks.db"));
             CheckIgnoredCaptureInsert(Path.Combine(temporary.FullName, "ignored-capture.db"));
             BreakDisplayChecks.Run(temporary.FullName);
+            WarningInputSessionChecks.Run(Path.Combine(temporary.FullName, "warning-input.db"));
             CheckTrayMenuPolicy();
             CheckCaptureMotionStudy(Path.Combine(temporary.FullName, "motion-study.db"));
             CheckReminderInterlock(Path.Combine(temporary.FullName, "reminders.db"));

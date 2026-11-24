@@ -5,7 +5,8 @@ namespace OpenBreak;
 
 internal static class Program
 {
-    private const string RemoveV10Style = "ALTER TABLE appearance_preferences DROP COLUMN floating_timer_style;\n";
+    private const string RemoveV11Typing = "ALTER TABLE reminder_state DROP COLUMN finish_typing;\n";
+    private const string RemoveV10Style = RemoveV11Typing + "ALTER TABLE appearance_preferences DROP COLUMN floating_timer_style;\n";
 
     private const string RemoveV9Countdown = RemoveV10Style + """
         ALTER TABLE appearance_preferences DROP COLUMN tray_countdown;
@@ -54,6 +55,7 @@ internal static class Program
             Console.WriteLine("PASS v8 settings defaults, roundtrip, validation and atomic appearance writes");
             CheckCountdownV9(temporary.FullName);
             CheckFloatingStyleV10(temporary.FullName);
+            CheckFinishTypingV11(temporary.FullName);
             CheckWorkPauseMigration(temporary.FullName);
             Console.WriteLine("PASS version-five migration, durable work pause and rejection of invalid work-pause state");
             CheckRhythmMigration(temporary.FullName);
@@ -77,7 +79,7 @@ internal static class Program
         var path = Path.Combine(folder, "rename.db");
         var store = new TaskStore(path);
         store.Add("Keep this task", null);
-        Require(Scalar(path, "PRAGMA application_id") is 0x41465442L && Scalar(path, "PRAGMA user_version") is 10L,
+        Require(Scalar(path, "PRAGMA application_id") is 0x41465442L && Scalar(path, "PRAGMA user_version") is 11L,
             "OpenBreak uses the existing database identity and schema version");
         Console.WriteLine("PASS OpenBreak preserves the data directory and SQLite identity");
     }
@@ -118,7 +120,7 @@ internal static class Program
 
         Require(store.LoadAppearance() == appearance && store.LoadFloatingTimerPosition() is null &&
             store.LoadReminders() == (rhythm, checkpoint) && TaskFingerprint(path) == tasksBefore &&
-            Scalar(path, "PRAGMA user_version") is 10L,
+            Scalar(path, "PRAGMA user_version") is 11L,
             "the v9 lift preserves order, rhythm, work pause, theme, motion and sound with both countdowns off");
         Console.WriteLine("PASS v9 countdown migration, independent defaults and rollback");
 
@@ -185,7 +187,7 @@ internal static class Program
         Require(Scalar(conflict, "PRAGMA user_version") is 9L && File.ReadAllBytes(conflict).SequenceEqual(original),
             "version-nine schema conflicts leave the prior database byte-for-byte intact");
 
-        Require(store.LoadAppearance() == appearance && Scalar(path, "PRAGMA user_version") is 10L &&
+        Require(store.LoadAppearance() == appearance && Scalar(path, "PRAGMA user_version") is 11L &&
             store.LoadFloatingTimerPosition() == position && TaskFingerprint(path) == tasks &&
             store.LoadCapturePreferences() == capture && store.LoadReminders() == (rhythm, checkpoint),
             "version-ten migration adds Standard while preserving all existing records and opt-ins");
@@ -384,7 +386,7 @@ internal static class Program
         var loaded = store.LoadReminders();
         Require(loaded.Settings == ReminderSettings.Default && loaded.Checkpoint is null,
             "Migration never opts into reminders.");
-        Require(Scalar(path, "PRAGMA user_version") is 10L && TaskFingerprint(path) == before,
+        Require(Scalar(path, "PRAGMA user_version") is 11L && TaskFingerprint(path) == before,
             "Migration preserves each task ID, title, next step, lane order and archive flag.");
 
         var blocked = Path.Combine(folder, "blocked-migration.db");
@@ -456,7 +458,7 @@ internal static class Program
         Require(Scalar(blocked, "PRAGMA user_version") is 5L && File.ReadAllBytes(blocked).SequenceEqual(bytes),
             "An invalid version-five checkpoint leaves the old schema and file byte-identical.");
 
-        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 10L &&
+        Require(store.LoadReminders() == (settings, checkpoint) && Scalar(path, "PRAGMA user_version") is 11L &&
             Scalar(path, "SELECT work_paused FROM reminder_state") is 0L,
             "A legacy reminder defaults to work unpaused and keeps its presentation pause and cadence.");
         Require(Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")) &&
@@ -510,7 +512,7 @@ internal static class Program
         WriteLegacyRhythmSettings(path, version: 6);
         var tasks = TaskFingerprint(path);
         var checkpoint = Scalar(path, "SELECT checkpoint FROM reminder_state");
-        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 10L &&
+        Require(store.LoadReminders() == (settings, paused) && Scalar(path, "PRAGMA user_version") is 11L &&
             store.LoadCapturePreferences() == new CapturePreferences(shortcut, true) && store.LoadAppearance() == appearance &&
             TaskFingerprint(path) == tasks && Equals(checkpoint, Scalar(path, "SELECT checkpoint FROM reminder_state")),
             "v6 migration keeps all exact old durations, opted-in hours, settings, task order and paused snooze while adding defaults");
@@ -625,7 +627,7 @@ internal static class Program
 
             var migrated = store.LoadReminders();
             var reopened = new TaskStore(path);
-            Require(Scalar(path, "PRAGMA user_version") is 10L && migrated == reopened.LoadReminders() &&
+            Require(Scalar(path, "PRAGMA user_version") is 11L && migrated == reopened.LoadReminders() &&
                 migrated.Settings == (timerOnly.HasValue ? settings : ReminderSettings.Default) &&
                 migrated.Checkpoint == (timerOnly.HasValue ? checkpoint : null) &&
                 Equals(rawCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
@@ -717,13 +719,14 @@ internal static class Program
             DROP TABLE floating_timer_position;
             DROP TABLE capture_preferences;
             ALTER TABLE reminder_state DROP COLUMN work_paused;
+            ALTER TABLE reminder_state DROP COLUMN finish_typing;
             PRAGMA user_version = 2;
             """);
         var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
         var migrated = new TaskStore(path);
         Require(migrated.LoadCapturePreferences() == new CapturePreferences(CaptureShortcut.Default, false),
             "Existing installations start with the default capture shortcut and optional guide.");
-        Require(Scalar(path, "PRAGMA user_version") is 10L && TaskFingerprint(path) == fingerprint &&
+        Require(Scalar(path, "PRAGMA user_version") is 11L && TaskFingerprint(path) == fingerprint &&
             migrated.LoadReminders() == (reminders, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "Migration keeps tasks, the timer-only choice and the checkpoint.");
@@ -794,13 +797,14 @@ internal static class Program
             DROP TABLE appearance_preferences;
             DROP TABLE floating_timer_position;
             ALTER TABLE reminder_state DROP COLUMN work_paused;
+            ALTER TABLE reminder_state DROP COLUMN finish_typing;
             PRAGMA user_version = 3;
             """);
         var tasks = TaskFingerprint(path);
         var capture = Scalar(path, "SELECT shortcut || guide_dismissed FROM capture_preferences WHERE id = 1");
         var savedCheckpoint = Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1");
 
-        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 10L &&
+        Require(store.LoadAppearance() == AppearancePreferences.Default && Scalar(path, "PRAGMA user_version") is 11L &&
             store.LoadReminders() == (settings, checkpoint) &&
             Equals(savedCheckpoint, Scalar(path, "SELECT checkpoint FROM reminder_state WHERE id = 1")),
             "v3 upgrade defaults to System/Dusk and maintains the reminder checkpoint");
@@ -861,7 +865,7 @@ internal static class Program
             "A failing second column addition rolls back the first and preserves the v7 file.");
 
         Require(store.LoadAppearance() == prior && prior.Motion == SceneMotion.FollowWindows && !prior.BreakStartSound &&
-            Scalar(path, "PRAGMA user_version") is 10L && store.LoadReminders() == (settings, paused) &&
+            Scalar(path, "PRAGMA user_version") is 11L && store.LoadReminders() == (settings, paused) &&
             Equals(Scalar(path, "SELECT settings || checkpoint || work_paused FROM reminder_state WHERE id = 1"), rhythm) &&
             TaskFingerprint(path) == tasks && store.LoadCapturePreferences() == new CapturePreferences(shortcut, true),
             "A v7 upgrade adds safe defaults and preserves the stored scene, theme, tasks, capture and rhythm byte-for-byte.");
@@ -900,6 +904,77 @@ internal static class Program
             ExpectStorageError(() => store.LoadAppearance());
             ExecuteSql(path, "UPDATE appearance_preferences SET scene_motion = 'Off', break_start_sound = 1 WHERE id = 1;");
         }
+    }
+
+    private static void CheckFinishTypingV11(string folder)
+    {
+        var path = Path.Combine(folder, "finish-typing-v10.db");
+        var store = new TaskStore(path);
+        store.Add("Keep first task", "Keep this note");
+        store.Add("Keep archived task");
+        store.SetArchived(store.List(archived: false)[1].Id, archived: true);
+        var tasks = TaskFingerprint(path);
+        var appearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight, SceneMotion.Off,
+            BreakStartSound: true, TrayCountdown: true, FloatingTimer: true, FloatingTimerOnTop: true,
+            TimerStyle: FloatingTimerStyle.Compact);
+        var position = new FloatingTimerPosition(@"\\.\DISPLAY2", 6587, 3219);
+        Require(CaptureShortcut.TryParse("Alt+Shift+J", out var shortcut), "valid migration fixture shortcut");
+        var capture = new CapturePreferences(shortcut, true);
+        var settings = ReminderSettings.Default with { Enabled = true, ShortSeconds = 15, SnoozeSeconds = 79 };
+        var checkpoint = new ReminderCheckpoint(ReminderPhase.Snoozed, TimeSpan.FromSeconds(68), 1, false, TimeSpan.Zero,
+            new DateTimeOffset(2026, 1, 2, 12, 0, 0, TimeSpan.Zero)) { WorkPaused = true };
+        store.SaveAppearance(appearance);
+        store.SaveFloatingTimerPosition(position);
+        store.SaveCaptureShortcut(shortcut);
+        store.DismissCaptureGuide();
+        store.SaveReminders(settings, checkpoint);
+        ExecuteSql(path, $"{RemoveV11Typing} PRAGMA user_version = 10;");
+        const string reminderData = "SELECT settings || checkpoint || work_paused FROM reminder_state WHERE id = 1";
+        var rhythm = Scalar(path, reminderData);
+
+        var conflict = Path.Combine(folder, "finish-typing-conflict-v10.db");
+        File.Copy(path, conflict);
+        ExecuteSql(conflict, "ALTER TABLE reminder_state ADD COLUMN finish_typing TEXT;");
+        var beforeConflict = File.ReadAllBytes(conflict);
+        ExpectStorageError(() => new TaskStore(conflict).LoadReminders());
+        Require(File.ReadAllBytes(conflict).SequenceEqual(beforeConflict) && Scalar(conflict, "PRAGMA user_version") is 10L,
+            "A conflicting column leaves schema 10 and the file bytes intact.");
+        Console.WriteLine("PASS v11 Finish typing migration rolls back a schema conflict");
+
+        Require(!ReminderSettings.Default.FinishTyping && store.LoadReminders() == (settings, checkpoint) &&
+            Equals(Scalar(path, reminderData), rhythm) && Scalar(path, "SELECT finish_typing FROM reminder_state WHERE id = 1") is 0L &&
+            Scalar(path, "PRAGMA user_version") is 11L && TaskFingerprint(path) == tasks &&
+            store.LoadAppearance() == appearance && store.LoadFloatingTimerPosition() == position &&
+            store.LoadCapturePreferences() == capture, "Schema 11 defaults Finish typing off and preserves all prior records.");
+        Console.WriteLine("PASS v11 Finish typing migration preserves Compact style, placement, tasks, capture and exact reminder state");
+
+        var missing = Path.Combine(folder, "finish-typing-missing-v11.db");
+        File.Copy(path, missing);
+        ExecuteSql(missing, RemoveV11Typing);
+        ExpectStorageError(() => new TaskStore(missing).LoadReminders());
+
+        var optedIn = settings with { FinishTyping = true };
+        store.SaveReminders(optedIn, checkpoint);
+        Require(new TaskStore(path).LoadReminders() == (optedIn, checkpoint), "Finish typing round-trips after reopen.");
+        store.SaveBreakDisplay(BreakDisplay.TimerOnly, optedIn, checkpoint);
+        optedIn = optedIn with { BreakDisplay = BreakDisplay.TimerOnly };
+        Require(new TaskStore(path).LoadReminders() == (optedIn, checkpoint), "Saving display preserves Finish typing.");
+        Console.WriteLine("PASS Finish typing round-trips and survives saving the break display");
+
+        ExecuteSql(path, """
+            CREATE TRIGGER rewrite_typing AFTER UPDATE OF finish_typing ON reminder_state
+            WHEN NEW.finish_typing = 0 BEGIN
+                UPDATE tasks SET title = 'Unexpected side effect';
+                UPDATE reminder_state SET finish_typing = 1 WHERE id = 1;
+            END;
+            """);
+        var beforeSave = File.ReadAllBytes(path);
+        ExpectStorageError(() => store.SaveReminders(optedIn with { FinishTyping = false }, checkpoint));
+        Require(File.ReadAllBytes(path).SequenceEqual(beforeSave) && store.LoadReminders() == (optedIn, checkpoint),
+            "A rewritten input preference rolls back the settings, checkpoint and trigger side effects.");
+        ExecuteSql(path, "DROP TRIGGER rewrite_typing; PRAGMA ignore_check_constraints = ON; UPDATE reminder_state SET finish_typing = 2;");
+        ExpectStorageError(() => store.LoadReminders());
+        Console.WriteLine("PASS Finish typing exact readback rolls back rewrites and rejects missing or invalid values");
     }
 
     private static object? Scalar(string path, string sql)

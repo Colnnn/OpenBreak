@@ -24,6 +24,7 @@ internal sealed partial class OpenBreakSession
     private BoardTask? nextFocusTask;
     private bool focusTaskUnavailable;
     private string? reminderActionError;
+    private readonly Func<LastInputSample?> readLastInput;
 
     private void InitializeReminders(DispatcherQueue dispatcher, TimeProvider clock)
     {
@@ -90,6 +91,9 @@ internal sealed partial class OpenBreakSession
         (!scheduledSurface && visible is (Surface.Warning or Surface.Preview)) ||
         (desktop.MenuOpen && visible != Surface.Preview) || main?.DefersReminders == true;
 
+    private bool IsPreparingScheduledBreak => scheduledSurface && visible == Surface.Warning &&
+        reminders.Phase == ReminderPhase.Break;
+
     private void UpdateScheduledReminders(bool recheckPresentation = false, string reason = "reminder-tick")
     {
         if (EndIfPlacementInvalid(reason))
@@ -120,8 +124,9 @@ internal sealed partial class OpenBreakSession
             var pauses = reminders.PausedBy;
             var wasShowingWarning = scheduledSurface && visible == Surface.Warning;
             var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
-            reminders.Update(environment);
-            if (scheduledSurface && (reminders.PausedBy != ReminderPause.None || phase != reminders.Phase))
+            reminders.Update(environment, wasShowingWarning ? readLastInput : null, stagingBreak: IsPreparingScheduledBreak);
+            var retainWarning = wasShowingWarning && reminders.Phase == ReminderPhase.Break && reminders.Settings.FinishTyping;
+            if (scheduledSurface && (reminders.PausedBy != ReminderPause.None || (phase != reminders.Phase && !retainWarning)))
             {
                 Dismiss($"{reason}-phase-or-pause");
             }
@@ -133,6 +138,10 @@ internal sealed partial class OpenBreakSession
             SynchronizeScheduledSurface(wasShowingWarning);
         }
 
+        if (quitting)
+        {
+            return;
+        }
         UpdateReminderStatus(systemPause);
         UpdateReminderTimer();
     }
@@ -150,13 +159,15 @@ internal sealed partial class OpenBreakSession
         }
 
         var intended = phase == ReminderPhase.Warning ? Surface.Warning : Surface.Preview;
+        var retainWarning = intended == Surface.Preview && wasShowingWarning &&
+            scheduledSurface && visible == Surface.Warning && reminders.Settings.FinishTyping;
         if (intended == Surface.Warning)
         {
             warning.SetSnoozeDuration(reminders.Settings.SnoozeSeconds);
         }
         if (!scheduledSurface || visible != intended)
         {
-            if (scheduledSurface)
+            if (scheduledSurface && !retainWarning)
             {
                 Dismiss();
             }
@@ -165,36 +176,62 @@ internal sealed partial class OpenBreakSession
             {
                 preview.SetPreview(ReadBreakView(), reminders.IsLongBreak);
             }
-            var systemPause = desktop.GetSystemPause(checkPresentation: true);
+            var systemPause = retainWarning ? ReminderPause.None : desktop.GetSystemPause(checkPresentation: true);
             // The original warning's display can disappear during checkpoint I/O or task lookup.
             if (intended == Surface.Preview && wasShowingWarning && !warning.PlacementIsCurrent)
             {
                 SkipForDisplayLoss();
+                if (retainWarning && scheduledSurface)
+                {
+                    Dismiss();
+                }
                 return;
             }
-            var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
-            reminders.StartVisibleCountdown();
-            // Working hours may have ended during persistence or task lookup.
-            reminders.Update(environment);
-            if (reminders.Phase != phase || reminders.PausedBy != ReminderPause.None)
+            if (!retainWarning)
             {
-                checkpointDirty = true;
-                return;
+                var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
+                reminders.StartVisibleCountdown();
+                // Working hours may have ended during persistence or task lookup.
+                reminders.Update(environment);
+                if (reminders.Phase != phase || reminders.PausedBy != ReminderPause.None)
+                {
+                    checkpointDirty = true;
+                    return;
+                }
             }
 
             var source = desktop.WorkWindow();
-            if (intended == Surface.Preview)
+            if (intended == Surface.Preview && !retainWarning)
             {
                 floatingTimer?.Hide();
             }
+            var attempt = reminders;
             var shown = intended == Surface.Warning
                 ? warning.TryShow(source, reminders.IsLongBreak ? "Long break" : "Short break")
-                : preview.TryShow(source);
+                : preview.TryShow(source, retainWarning ? () => CanShowBreakAfterInputCheck(attempt) : null);
             if (!shown)
             {
+                if (retainWarning)
+                {
+                    if (quitting || !ReferenceEquals(attempt, reminders) || !scheduledSurface || visible != Surface.Warning)
+                    {
+                        return;
+                    }
+                    if (reminders.HoldingForInput)
+                    {
+                        checkpointDirty = true;
+                        warning.Update(1, holdingForInput: true);
+                        return;
+                    }
+                }
+
                 diagnostics?.Write($"event=not-shown phase={intended} mode=scheduled reason=prepare-surface " +
                     (intended == Surface.Preview ? preview.DescribePlacement() : warning.DescribePlacement()));
                 SkipForDisplayLoss();
+                if (retainWarning && scheduledSurface)
+                {
+                    Dismiss();
+                }
                 return;
             }
             returnWindow = source;
@@ -215,12 +252,45 @@ internal sealed partial class OpenBreakSession
         var seconds = Math.Max(1, (int)Math.Ceiling(reminders.Remaining.TotalSeconds));
         if (intended == Surface.Warning)
         {
-            warning.Update(seconds);
+            warning.Update(seconds, reminders.HoldingForInput);
         }
         else
         {
             preview.Update(seconds);
         }
+    }
+
+    private bool CanShowBreakAfterInputCheck(ReminderScheduler attempt)
+    {
+        if (quitting || !ReferenceEquals(attempt, reminders) ||
+            !scheduledSurface || visible != Surface.Warning || reminders.Phase != ReminderPhase.Break)
+        {
+            return false;
+        }
+
+        if (EndIfPlacementInvalid("break-prepared"))
+        {
+            return false;
+        }
+
+        var systemPause = desktop.GetSystemPause(checkPresentation: true);
+        var environment = systemPause | (IsEditingOrPreviewing() ? ReminderPause.Interaction : ReminderPause.None);
+        // Count any suspension during preparation as time away, without spending unshown break time.
+        reminders.Update(environment, stagingBreak: true);
+        if (reminders.Phase != ReminderPhase.Break || reminders.PausedBy != ReminderPause.None)
+        {
+            checkpointDirty = true;
+            Dismiss();
+            return false;
+        }
+        if (reminders.HoldBeforeBreak(readLastInput))
+        {
+            return false;
+        }
+
+        warning.AppWindow.Hide();
+        floatingTimer?.Hide();
+        return true;
     }
 
     private void SkipForDisplayLoss()
@@ -264,7 +334,7 @@ internal sealed partial class OpenBreakSession
         }
         else
         {
-            reminders.Update(ReminderPause.Interaction);
+            reminders.Update(ReminderPause.Interaction, stagingBreak: IsPreparingScheduledBreak);
         }
         Dismiss(includeFloating: false);
         checkpointDirty = true;
@@ -446,6 +516,7 @@ internal sealed partial class OpenBreakSession
             (pauses & ReminderPause.OutsideHours) != 0 ? "Reminders on · Outside working hours" :
             ((pauses | systemPause) & (ReminderPause.Locked | ReminderPause.Suspended | ReminderPause.Presentation)) != 0 ? "Reminders on · Paused by Windows" :
             phase == ReminderPhase.Snoozed ? "Reminders on · Snoozed" :
+            reminders.HoldingForInput ? "Reminders on · Waiting for keyboard and mouse" :
             phase is ReminderPhase.Warning or ReminderPhase.Break ? "Reminders on · Break due" : "Reminders on · Working interval");
         main?.Breaks.SetStatus(desktop.ReminderStatus);
         PublishFocusSnapshot();

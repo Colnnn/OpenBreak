@@ -34,11 +34,12 @@ internal sealed partial class OpenBreakSession
 
     internal OpenBreakSession(DispatcherQueue dispatcher, Action exit, TaskStore? tasks = null,
         TimeProvider? reminderClock = null, bool captureMotionStudy = false, BreakDiagnostics? diagnostics = null,
-        Action? playBreakCue = null)
+        Action? playBreakCue = null, Func<LastInputSample?>? readLastInput = null)
     {
         this.exit = exit;
         this.diagnostics = diagnostics;
         this.playBreakCue = playBreakCue;
+        this.readLastInput = readLastInput ?? LastInputActivity.Read;
         this.tasks = tasks ?? TaskStore.ForCurrentUser();
         capture = new CaptureWindow(SaveTask, () => Dismiss(), captureMotionStudy);
         warning = new WarningWindow(SnoozeReminder, SkipReminder);
@@ -447,7 +448,7 @@ internal sealed partial class OpenBreakSession
     {
         if (scheduledSurface)
         {
-            reminders.Update(ReminderPause.Interaction);
+            reminders.Update(ReminderPause.Interaction, stagingBreak: IsPreparingScheduledBreak);
             checkpointDirty = true;
         }
         if (visible is Surface.Warning or Surface.Preview)

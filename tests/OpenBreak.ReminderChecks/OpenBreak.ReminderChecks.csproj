@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/OpenBreak/Scheduling/ReminderScheduler.cs" Link="ReminderScheduler.cs" />
+    <Compile Include="../../src/OpenBreak/Scheduling/InputQuietPeriod.cs" Link="InputQuietPeriod.cs" />
     <Compile Include="../TestClock.cs" Link="TestClock.cs" />
   </ItemGroup>
 </Project>

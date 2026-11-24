@@ -18,7 +18,7 @@ internal sealed partial class TaskStore(string path)
     // Keep the original on-disk identity so existing tasks and settings open in place.
     private const string UserDataDirectory = "Afterbreak";
     private const int ApplicationId = 0x41465442;
-    private const int SchemaVersion = 10;
+    private const int SchemaVersion = 11;
     private const string TaskFields = "id, title, next_step, status";
 
     internal static string CurrentUserDatabasePath => Path.Combine(
@@ -268,13 +268,9 @@ internal sealed partial class TaskStore(string path)
                 {
                     MigrateAppearance(connection, transaction, version);
                 }
-                if (version is >= 2 and < 7)
+                if (version >= 2)
                 {
                     MigrateReminderSettings(connection, transaction, version);
-                }
-                else if (version >= 7)
-                {
-                    ReadReminders(connection, transaction);
                 }
                 if (version >= 9)
                 {

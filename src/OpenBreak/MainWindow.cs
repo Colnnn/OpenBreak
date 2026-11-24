@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 
@@ -22,7 +23,7 @@ internal sealed class MainWindow : Window
         PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
         CompactModeThresholdWidth = 700,
         ExpandedModeThresholdWidth = 950,
-        OpenPaneLength = 192,
+        OpenPaneLength = 176,
     };
     private readonly Dictionary<ManagementPage, (NavigationViewItem Item, UserControl Content)> pages = [];
     private bool placed;
@@ -41,6 +42,8 @@ internal sealed class MainWindow : Window
         Capture.CanRestoreFocus = () => HasForeground && CurrentPage == ManagementPage.Capture;
         Title = "OpenBreak";
 
+        navigation.Resources["NavigationViewContentBackground"] = SurfaceStyle.Brush(0, 0);
+        navigation.Resources["NavigationViewContentGridBorderBrush"] = SurfaceStyle.Brush(0, 0);
         var body = new Grid();
         AddPage(ManagementPage.Focus, "Focus", Symbol.Play, focus);
         AddPage(ManagementPage.Tasks, "Tasks", Symbol.List, tasks);
@@ -49,7 +52,21 @@ internal sealed class MainWindow : Window
         AddPage(ManagementPage.Capture, "Capture", Symbol.Edit, capture);
         AddPage(ManagementPage.Appearance, "Appearance", Symbol.Setting, appearance);
         navigation.Content = body;
-        Content = navigation;
+        var quickCapture = ManagementStyle.Button("Quick capture", "QuickCapture", () =>
+        {
+            if (CurrentPage != ManagementPage.Tasks || !Tasks.HasModalEditor)
+            {
+                QuickCaptureRequested?.Invoke();
+            }
+        }, link: true);
+        quickCapture.HorizontalAlignment = HorizontalAlignment.Right;
+        var shell = new Grid();
+        shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shell.RowDefinitions.Add(new RowDefinition());
+        shell.Children.Add(new Border { Style = SurfaceStyle.GetStyle("OpenBreakManagementShellCommandBarStyle"), Child = quickCapture });
+        Grid.SetRow(navigation, 1);
+        shell.Children.Add(navigation);
+        Content = shell;
         navigation.SelectionChanged += (_, args) =>
         {
             if (args.SelectedItem is NavigationViewItem { Tag: ManagementPage page } && page != CurrentPage)
@@ -72,6 +89,7 @@ internal sealed class MainWindow : Window
         void AddPage(ManagementPage page, string label, Symbol icon, UserControl content)
         {
             var item = new NavigationViewItem { Content = label, Icon = new SymbolIcon(icon), Tag = page };
+            AutomationProperties.SetAutomationId(item, $"OpenBreakNavigation{page}");
             content.Visibility = page == ManagementPage.Focus ? Visibility.Visible : Visibility.Collapsed;
             pages.Add(page, (item, content));
             navigation.MenuItems.Add(item);
@@ -90,6 +108,7 @@ internal sealed class MainWindow : Window
     internal nint GuideSource { get; private set; }
     internal bool GuideHasForeground => !quitting && HasForeground && CurrentPage == ManagementPage.Capture && Capture.GuideVisible;
     internal event Action<ManagementPage>? PageVisited;
+    internal event Action? QuickCaptureRequested;
 
     internal bool DefersReminders => AppWindow.IsVisible && (CurrentPage switch
     {

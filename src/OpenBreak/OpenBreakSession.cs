@@ -198,6 +198,7 @@ internal sealed partial class OpenBreakSession
             appearancePage.SetPreferences(appearancePreferences, appearanceLoadFailed);
             main = new MainWindow(focusPage, tasksPage, breaksPage, capturePage, appearancePage);
             main.PageVisited += RefreshPageAfterLoadFailure;
+            main.QuickCaptureRequested += () => BindTrayCommand(main.Handle)(TrayCommand.Capture);
             desktop.MainHandle = main.Handle;
             appearance.Track(main, SurfaceMaterial.Mica);
         }

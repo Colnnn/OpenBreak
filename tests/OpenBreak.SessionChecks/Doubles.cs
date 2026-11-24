@@ -366,6 +366,9 @@ namespace OpenBreak
         public int Opens { get; private set; }
         public bool LastActivate { get; private set; }
         public event Action<ManagementPage>? PageVisited;
+        public event Action? QuickCaptureRequested;
+
+        public void RequestQuickCapture() => QuickCaptureRequested?.Invoke();
 
         public bool DefersReminders => IsVisible && (CurrentPage switch
         {

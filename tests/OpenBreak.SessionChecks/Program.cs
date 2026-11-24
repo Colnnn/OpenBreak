@@ -490,9 +490,9 @@ internal static class Program
             CaptureShortcut.TryParse("Ctrl+Shift+7", out var chord) && captureSettings.Apply(chord) is null &&
             tray.CaptureBinding.Active == chord && captureSettings.DismissGuide(), "capture settings apply a shortcut and persist guidance dismissal");
         Check(store.LoadReminders() == checkpoint, "shortcut and guidance writes leave the reminder checkpoint unchanged");
-        tray.Send(TrayCommand.Capture, MainWindow.Current.Handle);
+        MainWindow.Current.RequestQuickCapture();
         Check(CaptureWindow.Current.Save("Capture with settings open") && SurfaceWindow.Returned == MainWindow.Current.Handle && MainWindow.Current.IsVisible,
-            "capture returns to capture settings without replacing its draft");
+            "shell quick capture returns to capture settings without replacing its draft");
         captureSettings.IsDirty = true;
         timer.Fire();
         Tick(20);

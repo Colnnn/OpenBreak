@@ -8,6 +8,96 @@
             <ResourceDictionary.MergedDictionaries>
                 <controls:XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#F3F6F4" />
+                    <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OpenBreakManagementText" Color="#172B26" />
+                    <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="#475E55" />
+                    <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#116B55" />
+                    <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#CCD9D1" />
+                    <Color x:Key="OpenBreakFocusHeroColor">#EBF5EB</Color>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#17221F" />
+                    <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#20302B" />
+                    <SolidColorBrush x:Key="OpenBreakManagementText" Color="#EDF5F0" />
+                    <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="#B6C8BF" />
+                    <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#83D9B2" />
+                    <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#172B26" />
+                    <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#40524A" />
+                    <Color x:Key="OpenBreakFocusHeroColor">#20372E</Color>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementCard" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementText" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="{ThemeResource SystemColorWindowTextColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <Style x:Key="OpenBreakManagementBackdropStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementBackground}" />
+            </Style>
+            <Style x:Key="OpenBreakManagementShellCommandBarStyle" TargetType="Border">
+                <Setter Property="BorderBrush" Value="{ThemeResource OpenBreakManagementStroke}" />
+                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                <Setter Property="Padding" Value="12,4" />
+            </Style>
+            <Style x:Key="OpenBreakManagementCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementCard}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource OpenBreakManagementStroke}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+            <Style x:Key="OpenBreakFocusHeroStyle" TargetType="Border" BasedOn="{StaticResource OpenBreakManagementCardStyle}">
+                <Setter Property="CornerRadius" Value="16" />
+            </Style>
+            <Style x:Key="OpenBreakManagementLabelStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementText}" />
+            </Style>
+            <Style x:Key="OpenBreakManagementSupportingLabelStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementSecondaryText}" />
+            </Style>
+            <Style x:Key="OpenBreakManagementIconStyle" TargetType="SymbolIcon">
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementAccent}" />
+            </Style>
+            <Style x:Key="OpenBreakFocusPhaseDotStyle" TargetType="Ellipse">
+                <Setter Property="Stroke" Value="{ThemeResource OpenBreakManagementAccent}" />
+                <Setter Property="StrokeThickness" Value="2" />
+            </Style>
+            <Style x:Key="OpenBreakFocusPhaseRunningDotStyle" TargetType="Ellipse" BasedOn="{StaticResource OpenBreakFocusPhaseDotStyle}">
+                <Setter Property="Fill" Value="{ThemeResource OpenBreakManagementAccent}" />
+            </Style>
+            <Style x:Key="OpenBreakFocusCadenceMarkStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementStroke}" />
+                <Setter Property="CornerRadius" Value="2" />
+            </Style>
+            <Style x:Key="OpenBreakFocusCadenceCompleteMarkStyle" TargetType="Border" BasedOn="{StaticResource OpenBreakFocusCadenceMarkStyle}">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementAccent}" />
+            </Style>
+            <Style x:Key="OpenBreakManagementButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="16,6" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style x:Key="OpenBreakManagementPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementAccent}" />
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementOnAccent}" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="16,6" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style x:Key="OpenBreakManagementLinkButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementAccent}" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="8,6" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
             <Style x:Key="OpenBreakSurfaceFrameStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ApplicationPageBackgroundThemeBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource ControlStrokeColorDefaultBrush}" />

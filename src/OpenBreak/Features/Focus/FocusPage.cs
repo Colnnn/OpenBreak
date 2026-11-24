@@ -2,30 +2,41 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.Foundation;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
 
 internal sealed class FocusPage : UserControl
 {
-    private readonly TextBlock phase = Label("", SurfaceStyle.SectionTitle, heading: AutomationHeadingLevel.Level2);
-    private readonly TextBlock timer = SurfaceStyle.Timer("", 52);
-    private readonly TextBlock pauses = Secondary("", SurfaceStyle.Body);
-    private readonly TextBlock nextBreak = Label("", SurfaceStyle.Body);
-    private readonly TextBlock cadence = Secondary("", SurfaceStyle.Body);
-    private readonly TextBlock task = Label("", SurfaceStyle.SectionTitle);
-    private readonly TextBlock nextStep = Secondary("", SurfaceStyle.Body);
+    private readonly TextBlock phase = ManagementStyle.Label("", SurfaceStyle.Body, heading: AutomationHeadingLevel.Level2);
+    private readonly TextBlock timer = SurfaceStyle.Timer("", ManagementStyle.TimerSize);
+    private readonly TextBlock status = ManagementStyle.Label("", SurfaceStyle.Body, supporting: true);
+    private readonly TextBlock nextBreak = ManagementStyle.Label("", SurfaceStyle.SectionTitle);
+    private readonly TextBlock cadence = ManagementStyle.Label("", SurfaceStyle.Body, supporting: true);
+    private readonly TextBlock task = ManagementStyle.Label("", SurfaceStyle.SectionTitle);
+    private readonly TextBlock nextStep = ManagementStyle.Label("", SurfaceStyle.Body, supporting: true);
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
+    private readonly StackPanel body;
+    private readonly FocusScene scene = new();
+    private readonly StackPanel timerContent;
     private readonly Grid cards = new();
-    private readonly Border timerCard;
+    private readonly Grid cadenceMarks = new() { ColumnSpacing = SurfaceStyle.TightGap, MaxWidth = 236,
+        HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly Border hero;
     private readonly Border taskCard;
-    private readonly StackPanel workControls = new() { Spacing = SurfaceStyle.ControlGap };
-    private readonly StackPanel breakControls = new() { Spacing = SurfaceStyle.ControlGap };
+    private readonly Border breakCard;
+    private readonly TextBlock breakHeading;
+    private readonly TextBlock[] labels;
+    private readonly Ellipse phaseDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button startStop;
     private readonly Button pauseResume;
     private readonly Button snooze;
     private readonly Button skip;
     private readonly Button preview;
+    private readonly Style normal = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle");
+    private readonly Style primary = SurfaceStyle.GetStyle("OpenBreakManagementPrimaryButtonStyle");
     private FocusAction startStopAction;
     private FocusAction pauseResumeAction;
     private FocusAction skipAction;
@@ -36,61 +47,81 @@ internal sealed class FocusPage : UserControl
     internal FocusPage(Func<FocusAction, string?> execute, Action<ManagementPage> navigate, Action? openGuide = null)
     {
         timer.TextWrapping = TextWrapping.Wrap;
+        timer.Style = SurfaceStyle.GetStyle("OpenBreakManagementLabelStyle");
+        timer.FontWeight = FontWeights.SemiBold;
         AutomationProperties.SetLiveSetting(timer, AutomationLiveSetting.Off);
-        startStop = ActionButton(() => startStopAction);
-        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
+        startStop = ActionButton("FocusStartStop", () => startStopAction);
+        pauseResume = ActionButton("FocusPauseResume", () => pauseResumeAction);
+        snooze = ActionButton("FocusSnooze", () => FocusAction.Snooze);
+        skip = ActionButton("FocusSkip", () => skipAction);
+        preview = ActionButton("FocusPreview", () => previewAction);
+        var controls = new ActionRow { Margin = new Thickness(0, SurfaceStyle.ContentGap, 0, 0) };
+        foreach (var control in new[] { pauseResume, startStop, snooze, skip, preview })
         {
-            startStop.Style = style;
+            controls.Children.Add(control);
         }
-        pauseResume = ActionButton(() => pauseResumeAction);
-        snooze = ActionButton(() => FocusAction.Snooze);
-        skip = ActionButton(() => skipAction);
-        preview = ActionButton(() => previewAction);
-        workControls.Children.Add(startStop);
-        workControls.Children.Add(pauseResume);
-        breakControls.Children.Add(snooze);
-        breakControls.Children.Add(skip);
-        breakControls.Children.Add(preview);
-        breakControls.Children.Add(Link("Break settings", ManagementPage.Breaks));
 
-        timerCard = Card(phase, timer, pauses, nextBreak, cadence, workControls, breakControls);
-        taskCard = Card(Label("When you return", SurfaceStyle.StrongBody, AutomationHeadingLevel.Level2), task, nextStep,
-            Link("Open task board", ManagementPage.Tasks));
+        var phaseRow = IconLabel(phaseDot, phase);
+        timerContent = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = SurfaceStyle.ControlGap,
+            MaxWidth = 560,
+        };
+        timerContent.SizeChanged += (_, args) => FitTimer(args.NewSize.Width);
+        timerContent.Children.Add(phaseRow);
+        timerContent.Children.Add(timer);
+        timerContent.Children.Add(status);
+        timerContent.Children.Add(controls);
+
+        var heroLayout = new Grid { CornerRadius = new CornerRadius(15) };
+        var heroContent = new Grid { HorizontalAlignment = HorizontalAlignment.Left };
+        heroContent.Children.Add(timerContent);
+        heroLayout.Children.Add(scene);
+        heroLayout.Children.Add(heroContent);
+        hero = new Border
+        {
+            Style = SurfaceStyle.GetStyle("OpenBreakFocusHeroStyle"),
+            Child = heroLayout,
+            MinHeight = 310,
+            Padding = new Thickness(0),
+        };
+
+        var taskHeading = ManagementStyle.Label("When you return", SurfaceStyle.Body, heading: AutomationHeadingLevel.Level2);
+        breakHeading = ManagementStyle.Label("Next break", SurfaceStyle.Body, heading: AutomationHeadingLevel.Level2);
+        taskCard = DetailCard(Symbol.List, taskHeading, task, nextStep,
+            ManagementStyle.Button("Open task board", "FocusTaskBoard", () => navigate(ManagementPage.Tasks), link: true));
+        breakCard = DetailCard(Symbol.Clock, breakHeading, nextBreak, cadence,
+            ManagementStyle.Button("Break settings", "FocusBreakSettings", () => navigate(ManagementPage.Breaks), link: true), cadenceMarks);
         cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         cards.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
         cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
-        cards.Children.Add(timerCard);
         cards.Children.Add(taskCard);
-        cards.SizeChanged += (_, _) => LayoutCards();
-        timerCard.SizeChanged += (_, _) => LayoutControls();
-        LayoutCards();
+        cards.Children.Add(breakCard);
 
-        var body = new StackPanel { Spacing = SurfaceStyle.SectionGap, Margin = new Thickness(SurfaceStyle.PageInset), MaxWidth = 1100 };
-        body.Children.Add(SurfaceStyle.PageTitle("Focus"));
-        body.Children.Add(error);
+        body = new StackPanel { Spacing = ManagementStyle.SectionGap, MaxWidth = 1120 };
+        var heading = ManagementStyle.Label("Focus", SurfaceStyle.PageTitleSize, heading: AutomationHeadingLevel.Level1);
+        labels = [heading, phase, timer, status, taskHeading, task, nextStep, breakHeading, nextBreak, cadence];
+        var header = new ActionRow();
+        header.Children.Add(heading);
         if (openGuide is not null)
         {
-            var gettingStarted = new Button { Content = "Getting started" };
-            gettingStarted.Click += (_, _) => openGuide();
-            body.Children.Add(gettingStarted);
+            header.Children.Add(ManagementStyle.Button("Getting started", "FocusGettingStarted", openGuide, link: true));
         }
+        body.Children.Add(header);
+        body.Children.Add(error);
+        body.Children.Add(hero);
         body.Children.Add(cards);
-        Content = SurfaceStyle.Scroll(body);
+        var scroll = SurfaceStyle.Scroll(body);
+        scroll.SizeChanged += (_, args) => LayoutPage(args.NewSize.Width);
+        Content = scroll;
+        LayoutPage(0);
+        ActualThemeChanged += (_, _) => scene.ApplyTheme(ActualTheme);
 
-        Button ActionButton(Func<FocusAction> action)
-        {
-            var button = new Button();
-            button.Click += (_, _) => SetActionError(execute(action()));
-            return button;
-        }
-
-        Button Link(string label, ManagementPage page)
-        {
-            var button = new Button { Content = label };
-            button.Click += (_, _) => navigate(page);
-            return button;
-        }
+        Button ActionButton(string id, Func<FocusAction> action) =>
+            ManagementStyle.Button("", id, () => SetActionError(execute(action())));
     }
 
     internal void SetSnapshot(FocusSnapshot snapshot)
@@ -112,7 +143,7 @@ internal sealed class FocusPage : UserControl
             ReminderPhase.Warning => "Preview starts in",
             ReminderPhase.Break => "Preview break",
             _ when snapshot.RemindersUnavailable => "Reminders unavailable",
-            _ when !snapshot.Enabled => "Ready to focus · Reminders off",
+            _ when !snapshot.Enabled => "Ready to focus",
             _ => snapshot.Phase switch
             {
                 ReminderPhase.Snoozed => "Break snoozed",
@@ -121,16 +152,22 @@ internal sealed class FocusPage : UserControl
                 _ => "Work interval",
             },
         });
-        SetText(pauses, PauseDescription(snapshot.PausedBy, snapshot.PreviewPhase.HasValue));
-        SetText(nextBreak, $"{(snapshot.Phase is ReminderPhase.Warning or ReminderPhase.Break ? "Scheduled" : "Next")} " +
-            $"{(snapshot.NextBreakIsLong ? "long" : "short")} break · {ReminderDuration.Format(snapshot.UpcomingBreakSeconds)}");
+        var pauseDescription = PauseDescription(snapshot.PausedBy, snapshot.PreviewPhase.HasValue);
+        var remindersOff = !snapshot.Enabled && !snapshot.RemindersUnavailable && !snapshot.PreviewPhase.HasValue;
+        SetText(status, remindersOff ? "Scheduled reminders are off" +
+            (pauseDescription.Length == 0 ? "" : $"\n{pauseDescription}") : pauseDescription);
+        var running = snapshot.PreviewPhase.HasValue || snapshot.Enabled && !snapshot.RemindersUnavailable && snapshot.PausedBy == ReminderPause.None;
+        phaseDot.Style = SurfaceStyle.GetStyle(running ? "OpenBreakFocusPhaseRunningDotStyle" : "OpenBreakFocusPhaseDotStyle");
+        SetText(breakHeading, snapshot.Phase is ReminderPhase.Warning or ReminderPhase.Break ? "Scheduled break" : "Next break");
+        SetText(nextBreak, $"{(snapshot.NextBreakIsLong ? "Long" : "Short")} break · {ReminderDuration.Format(snapshot.UpcomingBreakSeconds)}");
         SetText(cadence, snapshot.LongBreaks
             ? $"{snapshot.CompletedShorts} of {snapshot.ShortsBeforeLong} short breaks completed"
             : "Long breaks off");
         SetText(task, snapshot.TaskUnavailable ? "Saved tasks are unavailable" : snapshot.NextTask?.Title ?? "No saved task yet");
         SetText(nextStep, snapshot.NextTask?.NextStep ?? "");
-        pauses.Visibility = pauses.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        status.Visibility = status.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         nextStep.Visibility = nextStep.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateCadence(snapshot);
 
         startStopAction = snapshot.Enabled ? FocusAction.Stop : FocusAction.Start;
         pauseResumeAction = (snapshot.PausedBy & ReminderPause.Work) != 0 ? FocusAction.Resume : FocusAction.Pause;
@@ -142,13 +179,20 @@ internal sealed class FocusPage : UserControl
         SetButton(skip, skipAction, skipAction == FocusAction.EndBreak ? "End break" : "Skip break");
         SetButton(preview, previewAction, snapshot.PreviewPhase.HasValue ? "Cancel preview" : "Preview a break", alwaysVisible: true);
 
+        var primaryAction = snapshot.PreviewPhase.HasValue ? preview :
+            !snapshot.Enabled ? startStop :
+            pauseResume.IsEnabled ? pauseResume :
+            snooze.IsEnabled ? snooze :
+            skip.IsEnabled ? skip : null;
+        foreach (var button in new[] { startStop, pauseResume, snooze, skip, preview })
+        {
+            button.Style = button == primaryAction ? primary : normal;
+        }
+
         void SetButton(Button button, FocusAction action, string title, bool alwaysVisible = false)
         {
             var available = (snapshot.Actions & action) != 0;
-            if (!Equals(button.Content, title))
-            {
-                button.Content = title;
-            }
+            ManagementStyle.SetButtonText(button, title);
             button.Visibility = available || alwaysVisible ? Visibility.Visible : Visibility.Collapsed;
             button.IsEnabled = available;
         }
@@ -163,55 +207,109 @@ internal sealed class FocusPage : UserControl
     internal void ApplyAppearance(AppearanceState state)
     {
         textScale = state.TextScale;
-        LayoutCards();
+        LayoutPage(((ScrollViewer)Content).ActualWidth);
+        FitTimer(timerContent.ActualWidth);
+        scene.Visibility = state.ShowScene ? Visibility.Visible : Visibility.Collapsed;
+        scene.ApplyTheme(ActualTheme);
+        foreach (var label in labels)
+        {
+            SurfaceStyle.ApplyContrast(label, state);
+        }
+        foreach (var panel in new[] { hero, taskCard, breakCard })
+        {
+            if (state.HighContrast)
+            {
+                panel.Background = SurfaceStyle.Brush(state.WindowColor);
+                panel.BorderBrush = SurfaceStyle.Brush(state.TextColor);
+            }
+            else
+            {
+                panel.ClearValue(Border.BackgroundProperty);
+                panel.ClearValue(Border.BorderBrushProperty);
+            }
+        }
     }
 
-    private void LayoutCards()
+    private void LayoutPage(double width)
     {
-        var stack = cards.ActualWidth < 740 * textScale;
+        var inset = width < 660 ? ManagementStyle.NarrowInset : ManagementStyle.WideInset;
+        body.Margin = new Thickness(inset);
+        var wideHero = width >= 600 * textScale;
+        timerContent.Margin = new Thickness(wideHero ? 40 : ManagementStyle.NarrowInset, ManagementStyle.SectionGap,
+            wideHero ? 40 : ManagementStyle.NarrowInset, ManagementStyle.SectionGap);
+        var stack = width - 2 * inset < 560 * textScale;
         cards.ColumnSpacing = stack ? 0 : SurfaceStyle.SectionGap;
         cards.RowSpacing = stack ? SurfaceStyle.SectionGap : 0;
-        Grid.SetColumnSpan(timerCard, stack ? 2 : 1);
         Grid.SetColumnSpan(taskCard, stack ? 2 : 1);
-        Grid.SetColumn(taskCard, stack ? 0 : 1);
-        Grid.SetRow(taskCard, stack ? 1 : 0);
-        LayoutControls();
+        Grid.SetColumnSpan(breakCard, stack ? 2 : 1);
+        Grid.SetColumn(breakCard, stack ? 0 : 1);
+        Grid.SetRow(breakCard, stack ? 1 : 0);
     }
 
-    private void LayoutControls()
+    private void FitTimer(double width)
     {
-        var width = timerCard.ActualWidth / textScale;
-        timer.FontSize = width < 220 ? 28 : width < 280 ? 38 : 52;
-        workControls.Orientation = width < 310 ? Orientation.Vertical : Orientation.Horizontal;
-        breakControls.Orientation = width < 620 ? Orientation.Vertical : Orientation.Horizontal;
+        // Leave enough room for seven tabular characters at the longest supported interval (24:00:00).
+        var available = width / textScale;
+        timer.FontSize = Math.Clamp(Math.Floor(available / 4), 24, ManagementStyle.TimerSize);
     }
 
-    private static Border Card(params UIElement[] children)
+    private void UpdateCadence(FocusSnapshot snapshot)
     {
-        var content = new StackPanel { Spacing = SurfaceStyle.ControlGap };
-        foreach (var child in children)
+        var count = snapshot.LongBreaks ? snapshot.ShortsBeforeLong : 0;
+        if (cadenceMarks.Children.Count != count)
         {
-            content.Children.Add(child);
+            cadenceMarks.Children.Clear();
+            cadenceMarks.ColumnDefinitions.Clear();
+            for (var index = 0; index < count; index++)
+            {
+                var mark = new Border { Height = 3, Width = 12 };
+                AutomationProperties.SetAccessibilityView(mark, AccessibilityView.Raw);
+                cadenceMarks.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                Grid.SetColumn(mark, index);
+                cadenceMarks.Children.Add(mark);
+            }
         }
-        var panel = SurfaceStyle.Panel(content);
-        panel.Padding = new Thickness(SurfaceStyle.PageInset);
-        panel.VerticalAlignment = VerticalAlignment.Top;
-        return panel;
+        for (var index = 0; index < count; index++)
+        {
+            ((Border)cadenceMarks.Children[index]).Style = SurfaceStyle.GetStyle(index < snapshot.CompletedShorts
+                ? "OpenBreakFocusCadenceCompleteMarkStyle" : "OpenBreakFocusCadenceMarkStyle");
+        }
+        cadenceMarks.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private static TextBlock Label(string text, double size, AutomationHeadingLevel heading = AutomationHeadingLevel.None)
+    private static Border DetailCard(Symbol symbol, TextBlock heading, TextBlock title, TextBlock detail, Button link, Grid? marks = null)
     {
-        var label = SurfaceStyle.Label(text, size, FontWeights.SemiBold);
-        label.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(label, heading);
-        return label;
+        var icon = new SymbolIcon(symbol) { Style = SurfaceStyle.GetStyle("OpenBreakManagementIconStyle"),
+            VerticalAlignment = VerticalAlignment.Center };
+        var content = new StackPanel { Spacing = SurfaceStyle.TightGap };
+        content.Children.Add(title);
+        content.Children.Add(detail);
+        if (marks is not null)
+        {
+            content.Children.Add(marks);
+        }
+        var layout = new Grid { RowSpacing = SurfaceStyle.ContentGap };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition());
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(IconLabel(icon, heading));
+        Grid.SetRow(content, 1);
+        layout.Children.Add(content);
+        Grid.SetRow(link, 2);
+        layout.Children.Add(link);
+        return new Border { Style = SurfaceStyle.GetStyle("OpenBreakManagementCardStyle"), Child = layout };
     }
 
-    private static TextBlock Secondary(string text, double size)
+    private static Grid IconLabel(FrameworkElement icon, TextBlock label)
     {
-        var label = SurfaceStyle.SecondaryLabel(text, size);
-        label.TextWrapping = TextWrapping.Wrap;
-        return label;
+        AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+        var row = new Grid { ColumnSpacing = SurfaceStyle.ControlGap };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.Children.Add(icon);
+        Grid.SetColumn(label, 1);
+        row.Children.Add(label);
+        return row;
     }
 
     private static void SetText(TextBlock label, string text)
@@ -244,6 +342,50 @@ internal sealed class FocusPage : UserControl
             {
                 reasons.Add(description);
             }
+        }
+    }
+
+    // Measure native buttons at their actual text size so the same controls can move to a new row.
+    private sealed class ActionRow : Panel
+    {
+        protected override Size MeasureOverride(Size availableSize) => Layout(availableSize.Width, arrange: false);
+
+        protected override Size ArrangeOverride(Size finalSize)
+        {
+            Layout(finalSize.Width, arrange: true);
+            return finalSize;
+        }
+
+        private Size Layout(double width, bool arrange)
+        {
+            double rowWidth = 0, rowHeight = 0, blockWidth = 0, y = 0;
+            foreach (var child in Children)
+            {
+                if (child.Visibility == Visibility.Collapsed)
+                {
+                    continue;
+                }
+                if (!arrange)
+                {
+                    child.Measure(new Size(width, double.PositiveInfinity));
+                }
+                var size = child.DesiredSize;
+                var x = rowWidth == 0 ? 0 : rowWidth + SurfaceStyle.ControlGap;
+                if (rowWidth > 0 && x + size.Width > width)
+                {
+                    y += rowHeight + SurfaceStyle.ControlGap;
+                    rowHeight = 0;
+                    x = 0;
+                }
+                if (arrange)
+                {
+                    child.Arrange(new Rect(x, y, Math.Min(size.Width, width), size.Height));
+                }
+                rowWidth = x + size.Width;
+                rowHeight = Math.Max(rowHeight, size.Height);
+                blockWidth = Math.Max(blockWidth, rowWidth);
+            }
+            return new Size(blockWidth, y + rowHeight);
         }
     }
 }

@@ -69,7 +69,7 @@ internal sealed class WindowAppearance : IDisposable
         var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray or SurfaceMaterial.FloatingTimer;
         var panel = frame ? (Border)window.Content : new Border
         {
-            Style = (Style)Application.Current.Resources["OpenBreakOpaqueBackdropStyle"],
+            Style = SurfaceStyle.GetStyle(window is MainWindow ? "OpenBreakManagementBackdropStyle" : "OpenBreakOpaqueBackdropStyle"),
         };
         if (!frame)
         {

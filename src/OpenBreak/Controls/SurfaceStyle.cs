@@ -95,6 +95,49 @@ internal static class SurfaceStyle
         CornerRadius = PanelCorner,
         Padding = new Thickness(ContentGap),
     };
+
+    internal static Style GetStyle(string key) => (Style)Application.Current.Resources[key];
+}
+
+internal static class ManagementStyle
+{
+    internal const double WideInset = 32;
+    internal const double NarrowInset = 16;
+    internal const double SectionGap = 24;
+    internal const double TimerSize = 64;
+
+    internal static Button Button(string text, string automationId, Action click, bool link = false)
+    {
+        var button = new Button
+        {
+            Content = new TextBlock { TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
+            Style = SurfaceStyle.GetStyle(link ? "OpenBreakManagementLinkButtonStyle" : "OpenBreakManagementButtonStyle"),
+        };
+        AutomationProperties.SetAutomationId(button, automationId);
+        SetButtonText(button, text);
+        button.Click += (_, _) => click();
+        return button;
+    }
+
+    internal static void SetButtonText(Button button, string text)
+    {
+        var label = (TextBlock)button.Content;
+        if (label.Text != text)
+        {
+            label.Text = text;
+            AutomationProperties.SetName(button, text);
+        }
+    }
+
+    internal static TextBlock Label(string text, double size, bool supporting = false,
+        AutomationHeadingLevel heading = AutomationHeadingLevel.None)
+    {
+        var label = SurfaceStyle.Label(text, size, supporting ? FontWeights.Normal : FontWeights.SemiBold);
+        label.Style = SurfaceStyle.GetStyle(supporting ? "OpenBreakManagementSupportingLabelStyle" : "OpenBreakManagementLabelStyle");
+        label.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(label, heading);
+        return label;
+    }
 }
 
 internal sealed class ScenePalette

@@ -50,7 +50,6 @@ internal sealed class TasksPage : UserControl
     private AppearanceState? appearance;
     private ElementTheme dialogTheme;
     private ContentDialog? activeDialog;
-    private bool dismissDialogOnLeave;
     private MenuFlyout? openMenu;
     private CardFocus? menuOwner;
     private int menusAwaitingClose;
@@ -180,10 +179,6 @@ internal sealed class TasksPage : UserControl
     {
         focusGeneration++;
         openMenu?.Hide();
-        if (dismissDialogOnLeave)
-        {
-            CloseEditor();
-        }
     }
 
     internal void OpenInlineEditor(bool focus = false)
@@ -478,9 +473,18 @@ internal sealed class TasksPage : UserControl
                 new ActionOrigin(new CardFocus(task.Id, CardAction.Restore, restore.FocusState), ++focusGeneration));
             taskActions.Add((task.Id, CardAction.Restore), restore);
 
-            var delete = ManagementStyle.Button("Delete", $"TasksDelete{task.Id}");
-            AutomationProperties.SetName(delete, $"Delete {task.Title}");
-            delete.Click += async (_, _) => await ConfirmDelete(task,
+            var delete = new Button
+            {
+                Content = new SymbolIcon(Symbol.Delete),
+                Style = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
+                MinWidth = 36,
+                MinHeight = 36,
+                Padding = new Thickness(6),
+            };
+            AutomationProperties.SetName(delete, $"Delete task: {task.Title}");
+            AutomationProperties.SetAutomationId(delete, $"TasksDelete{task.Id}");
+            ToolTipService.SetToolTip(delete, "Delete task");
+            delete.Click += (_, _) => ApplyChange(() => store.DeleteArchived(task.Id),
                 new ActionOrigin(new CardFocus(task.Id, CardAction.Delete, delete.FocusState), ++focusGeneration));
             taskActions.Add((task.Id, CardAction.Delete), delete);
 
@@ -695,65 +699,7 @@ internal sealed class TasksPage : UserControl
             }
         };
 
-        await ShowTaskDialog(dialog, origin);
-    }
-
-    private async Task ConfirmDelete(BoardTask task, ActionOrigin origin)
-    {
-        if (origin.Generation != focusGeneration || HasModalEditor || !archived || CanRestoreFocus?.Invoke() != true)
-        {
-            return;
-        }
-
-        var warning = ManagementStyle.BodyText($"“{task.Title}” will be permanently deleted. This can’t be undone.");
-        var feedback = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };
-        var content = new StackPanel { Spacing = SurfaceStyle.ContentGap };
-        content.Children.Add(warning);
-        content.Children.Add(feedback);
-        var dialog = new ContentDialog
-        {
-            Style = SurfaceStyle.GetStyle("OpenBreakTaskDialogStyle"),
-            XamlRoot = root.XamlRoot,
-            RequestedTheme = dialogTheme,
-            Title = "Delete task?",
-            Content = content,
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
-            PrimaryButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
-            CloseButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
-            DefaultButton = ContentDialogButton.Close,
-        };
-        dialog.Resources["ContentDialogTopOverlay"] = SurfaceStyle.Brush(0, 0);
-        AutomationProperties.SetAutomationId(dialog, "TasksDeleteDialog");
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
-            if (origin.Generation != focusGeneration || !archived || CanRestoreFocus?.Invoke() != true)
-            {
-                feedback.Message = "The task view changed. Cancel and reopen the confirmation.";
-                feedback.IsOpen = true;
-                args.Cancel = true;
-                return;
-            }
-
-            try
-            {
-                store.DeleteArchived(task.Id);
-            }
-            catch (Exception exception) when (TaskStore.IsStorageError(exception))
-            {
-                feedback.Message = "Couldn’t delete this task. Try again or cancel.";
-                feedback.IsOpen = true;
-                args.Cancel = true;
-            }
-        };
-
-        await ShowTaskDialog(dialog, origin, dismissOnLeave: true);
-    }
-
-    private async Task ShowTaskDialog(ContentDialog dialog, ActionOrigin origin, bool dismissOnLeave = false)
-    {
         activeDialog = dialog;
-        dismissDialogOnLeave = dismissOnLeave;
         ContentDialogResult result;
         try
         {
@@ -761,7 +707,6 @@ internal sealed class TasksPage : UserControl
         }
         finally
         {
-            dismissDialogOnLeave = false;
             activeDialog = null;
         }
         if (result == ContentDialogResult.Primary)

@@ -49,8 +49,8 @@ internal sealed class FocusPage : UserControl
         timer.Style = SurfaceStyle.GetStyle("OpenBreakManagementLabelStyle");
         timer.FontWeight = FontWeights.SemiBold;
         AutomationProperties.SetLiveSetting(timer, AutomationLiveSetting.Off);
-        startStop = ActionButton("FocusStartStop", () => startStopAction);
-        pauseResume = ActionButton("FocusPauseResume", () => pauseResumeAction);
+        startStop = ActionButton("FocusStartStop", () => startStopAction, Symbol.Play);
+        pauseResume = ActionButton("FocusPauseResume", () => pauseResumeAction, Symbol.Pause);
         snooze = ActionButton("FocusSnooze", () => FocusAction.Snooze);
         skip = ActionButton("FocusSkip", () => skipAction);
         preview = ActionButton("FocusPreview", () => previewAction);
@@ -119,8 +119,19 @@ internal sealed class FocusPage : UserControl
         LayoutPage(0);
         ActualThemeChanged += (_, _) => scene.ApplyTheme(ActualTheme);
 
-        Button ActionButton(string id, Func<FocusAction> action) =>
-            ManagementStyle.Button("", id, () => SetActionError(execute(action())));
+        Button ActionButton(string id, Func<FocusAction> action, Symbol? icon = null)
+        {
+            var button = ManagementStyle.Button("", id, () => SetActionError(execute(action())));
+            if (icon is Symbol symbol)
+            {
+                var glyph = new SymbolIcon(symbol);
+                AutomationProperties.SetAccessibilityView(glyph, AccessibilityView.Raw);
+                button.Content = glyph;
+                button.MinWidth = 36;
+                button.Padding = new Thickness(6);
+            }
+            return button;
+        }
     }
 
     internal void SetSnapshot(FocusSnapshot snapshot)
@@ -172,8 +183,10 @@ internal sealed class FocusPage : UserControl
         pauseResumeAction = (snapshot.PausedBy & ReminderPause.Work) != 0 ? FocusAction.Resume : FocusAction.Pause;
         skipAction = snapshot.Phase == ReminderPhase.Break ? FocusAction.EndBreak : FocusAction.Skip;
         previewAction = snapshot.PreviewPhase.HasValue ? FocusAction.CancelPreview : FocusAction.Preview;
-        SetButton(startStop, startStopAction, snapshot.Enabled ? "Stop focus" : "Start focus", alwaysVisible: true);
-        SetButton(pauseResume, pauseResumeAction, pauseResumeAction == FocusAction.Pause ? "Pause work" : "Resume work");
+        SetButton(startStop, startStopAction, snapshot.Enabled ? "Stop focus" : "Start focus",
+            alwaysVisible: true, symbol: snapshot.Enabled ? Symbol.Stop : Symbol.Play);
+        SetButton(pauseResume, pauseResumeAction, pauseResumeAction == FocusAction.Pause ? "Pause work" : "Resume work",
+            symbol: pauseResumeAction == FocusAction.Pause ? Symbol.Pause : Symbol.Play);
         SetButton(snooze, FocusAction.Snooze, $"Snooze {ReminderDuration.Format(snapshot.SnoozeSeconds)}");
         SetButton(skip, skipAction, skipAction == FocusAction.EndBreak ? "End break" : "Skip break");
         SetButton(preview, previewAction, snapshot.PreviewPhase.HasValue ? "Cancel preview" : "Preview a break", alwaysVisible: true);
@@ -188,10 +201,22 @@ internal sealed class FocusPage : UserControl
             button.Style = button == primaryAction ? primary : normal;
         }
 
-        void SetButton(Button button, FocusAction action, string title, bool alwaysVisible = false)
+        void SetButton(Button button, FocusAction action, string title, bool alwaysVisible = false, Symbol? symbol = null)
         {
             var available = (snapshot.Actions & action) != 0;
-            ManagementStyle.SetButtonText(button, title);
+            if (symbol is Symbol glyph)
+            {
+                ((SymbolIcon)button.Content).Symbol = glyph;
+                if (AutomationProperties.GetName(button) != title)
+                {
+                    AutomationProperties.SetName(button, title);
+                    ToolTipService.SetToolTip(button, title);
+                }
+            }
+            else
+            {
+                ManagementStyle.SetButtonText(button, title);
+            }
             button.Visibility = available || alwaysVisible ? Visibility.Visible : Visibility.Collapsed;
             button.IsEnabled = available;
         }

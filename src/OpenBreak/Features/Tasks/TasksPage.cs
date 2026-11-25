@@ -476,11 +476,9 @@ internal sealed class TasksPage : UserControl
             var delete = new Button
             {
                 Content = new SymbolIcon(Symbol.Delete),
-                Style = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
-                MinWidth = 36,
-                MinHeight = 36,
-                Padding = new Thickness(6),
+                Style = SurfaceStyle.GetStyle("OpenBreakArchiveDeleteButtonStyle"),
             };
+            SetArchiveDeleteResources(delete);
             AutomationProperties.SetName(delete, $"Delete task: {task.Title}");
             AutomationProperties.SetAutomationId(delete, $"TasksDelete{task.Id}");
             ToolTipService.SetToolTip(delete, "Delete task");
@@ -507,6 +505,22 @@ internal sealed class TasksPage : UserControl
             card.DropCompleted += (_, _) => draggedTask = null;
         }
         return card;
+    }
+
+    private static void SetArchiveDeleteResources(Button button)
+    {
+        // The native subtle template sets its own foreground in hover and pressed states.
+        var themes = Application.Current.Resources.ThemeDictionaries;
+        foreach (var theme in new[] { "Light", "Default", "HighContrast" })
+        {
+            var palette = (ResourceDictionary)themes[theme];
+            var foreground = palette["OpenBreakArchiveDeleteActiveForeground"];
+            button.Resources.ThemeDictionaries[theme] = new ResourceDictionary
+            {
+                ["SubtleButtonForegroundPointerOver"] = foreground,
+                ["SubtleButtonForegroundPressed"] = foreground,
+            };
+        }
     }
 
     private MenuFlyout CreateActionsMenu(BoardTask task, Button actions, bool canMoveUp, bool canMoveDown)

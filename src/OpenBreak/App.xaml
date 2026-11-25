@@ -19,6 +19,8 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#116B55" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#A6C4B0" />
+                    <SolidColorBrush x:Key="OpenBreakArchiveDeleteForeground" Color="#B42318" />
+                    <StaticResource x:Key="OpenBreakArchiveDeleteActiveForeground" ResourceKey="OpenBreakArchiveDeleteForeground" />
                     <SolidColorBrush x:Key="OpenBreakToggleHover" Color="#1D795F" />
                     <SolidColorBrush x:Key="OpenBreakTogglePressed" Color="#0D5846" />
                     <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="OpenBreakManagementAccent" />
@@ -42,6 +44,8 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#83D9B2" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#172B26" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#40524A" />
+                    <SolidColorBrush x:Key="OpenBreakArchiveDeleteForeground" Color="#FF8A80" />
+                    <StaticResource x:Key="OpenBreakArchiveDeleteActiveForeground" ResourceKey="OpenBreakArchiveDeleteForeground" />
                     <SolidColorBrush x:Key="OpenBreakToggleHover" Color="#98E3C1" />
                     <SolidColorBrush x:Key="OpenBreakTogglePressed" Color="#70C69F" />
                     <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="OpenBreakManagementAccent" />
@@ -64,6 +68,8 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="{ThemeResource SystemColorHighlightTextColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <StaticResource x:Key="OpenBreakArchiveDeleteForeground" ResourceKey="SystemColorButtonTextColorBrush" />
+                    <StaticResource x:Key="OpenBreakArchiveDeleteActiveForeground" ResourceKey="SystemControlHighlightBaseHighBrush" />
                     <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="SystemColorHighlightColorBrush" />
                     <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="SystemColorHighlightColorBrush" />
                     <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="SystemColorButtonFaceColorBrush" />
@@ -145,6 +151,15 @@
                 <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementAccent}" />
                 <Setter Property="MinHeight" Value="36" />
                 <Setter Property="Padding" Value="8,6" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style x:Key="OpenBreakArchiveDeleteButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakArchiveDeleteForeground}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="MinWidth" Value="36" />
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Padding" Value="6" />
                 <Setter Property="CornerRadius" Value="8" />
             </Style>
             <Style x:Key="OpenBreakSurfaceFrameStyle" TargetType="Border">

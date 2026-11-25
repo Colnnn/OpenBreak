@@ -10,15 +10,15 @@
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#F3F6F4" />
-                    <SolidColorBrush x:Key="OpenBreakManagementShellBackground" Color="#ECF2EE" />
-                    <SolidColorBrush x:Key="OpenBreakManagementShellHover" Color="#EAF1ED" />
-                    <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#E1EEE4" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellBackground" Color="#D2E4D7" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellHover" Color="#C3DCCB" />
+                    <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#EDF6EE" />
                     <SolidColorBrush x:Key="OpenBreakManagementText" Color="#172B26" />
                     <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="#475E55" />
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#116B55" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#CCD9D1" />
+                    <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#A6C4B0" />
                     <SolidColorBrush x:Key="OpenBreakToggleHover" Color="#1D795F" />
                     <SolidColorBrush x:Key="OpenBreakTogglePressed" Color="#0D5846" />
                     <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="OpenBreakManagementAccent" />
@@ -30,7 +30,7 @@
                     <StaticResource x:Key="ToggleSwitchKnobFillOn" ResourceKey="OpenBreakManagementOnAccent" />
                     <StaticResource x:Key="ToggleSwitchKnobFillOnPointerOver" ResourceKey="OpenBreakManagementOnAccent" />
                     <StaticResource x:Key="ToggleSwitchKnobFillOnPressed" ResourceKey="OpenBreakManagementOnAccent" />
-                    <Color x:Key="OpenBreakFocusHeroColor">#EBF5EB</Color>
+                    <Color x:Key="OpenBreakFocusHeroColor">#D6ECD8</Color>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#17221F" />

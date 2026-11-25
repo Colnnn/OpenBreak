@@ -27,6 +27,7 @@ internal sealed class MainWindow : Window
     };
     private readonly Dictionary<ManagementPage, (NavigationViewItem Item, UserControl Content)> pages = [];
     private readonly Border pageCanvas;
+    private readonly ManagementChrome chrome;
     private bool placed;
     private bool quitting;
     private bool tasksNeedRefresh = true;
@@ -54,7 +55,6 @@ internal sealed class MainWindow : Window
         AddPage(ManagementPage.Breaks, "Breaks", Symbol.Clock, breaks);
         AddPage(ManagementPage.Capture, "Capture", Symbol.Edit, capture);
         AddPage(ManagementPage.Appearance, "Appearance", Symbol.Setting, appearance);
-        // The window backdrop is visible in the shell. The page canvas stays opaque over it.
         pageCanvas = new Border
         {
             Name = "ManagementContentCanvas",
@@ -73,10 +73,12 @@ internal sealed class MainWindow : Window
         var shell = new Grid();
         shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         shell.RowDefinitions.Add(new RowDefinition());
-        shell.Children.Add(new Border { Style = SurfaceStyle.GetStyle("OpenBreakManagementShellCommandBarStyle"), Child = quickCapture });
+        shell.Children.Add(new Border { Name = "ManagementCommandBar",
+            Style = SurfaceStyle.GetStyle("OpenBreakManagementShellCommandBarStyle"), Child = quickCapture });
         Grid.SetRow(navigation, 1);
         shell.Children.Add(navigation);
         Content = shell;
+        chrome = new ManagementChrome(this, shell, navigation);
         navigation.SelectionChanged += (_, args) =>
         {
             if (args.SelectedItem is NavigationViewItem { Tag: ManagementPage page } && page != CurrentPage)
@@ -197,6 +199,7 @@ internal sealed class MainWindow : Window
 
     internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
     {
+        chrome.ApplyAppearance(state);
         if (state.HighContrast)
         {
             pageCanvas.Background = SurfaceStyle.Brush(state.WindowColor);

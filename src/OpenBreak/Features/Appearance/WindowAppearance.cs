@@ -67,10 +67,15 @@ internal sealed class WindowAppearance : IDisposable
         }
 
         var frame = material is SurfaceMaterial.Capture or SurfaceMaterial.Warning or SurfaceMaterial.Tray or SurfaceMaterial.FloatingTimer;
+        var management = material == SurfaceMaterial.Management;
         var panel = frame ? (Border)window.Content : new Border
         {
-            Style = SurfaceStyle.GetStyle(window is MainWindow ? "OpenBreakManagementBackdropStyle" : "OpenBreakOpaqueBackdropStyle"),
+            Style = SurfaceStyle.GetStyle(management ? "OpenBreakManagementShellStyle" : "OpenBreakOpaqueBackdropStyle"),
         };
+        if (management)
+        {
+            panel.Name = "ManagementShellCanvas";
+        }
         if (!frame)
         {
             var content = window.Content;
@@ -81,7 +86,6 @@ internal sealed class WindowAppearance : IDisposable
 
         SystemBackdrop? backdrop = material switch
         {
-            SurfaceMaterial.Mica when MicaController.IsSupported() => new MicaBackdrop(),
             SurfaceMaterial.Capture or SurfaceMaterial.Tray when DesktopAcrylicController.IsSupported() => new DesktopAcrylicBackdrop(),
             _ => null,
         };

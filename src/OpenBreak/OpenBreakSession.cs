@@ -200,7 +200,7 @@ internal sealed partial class OpenBreakSession
             main.PageVisited += RefreshPageAfterLoadFailure;
             main.QuickCaptureRequested += () => BindTrayCommand(main.Handle)(TrayCommand.Capture);
             desktop.MainHandle = main.Handle;
-            appearance.Track(main, SurfaceMaterial.Mica);
+            appearance.Track(main, SurfaceMaterial.Management);
         }
         main.TryShow(source, page, activate);
         UpdateReminderTimer();

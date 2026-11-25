@@ -11,6 +11,8 @@
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#F3F6F4" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellBackground" Color="#ECF2EE" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellHover" Color="#EAF1ED" />
                     <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="OpenBreakManagementText" Color="#172B26" />
                     <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="#475E55" />
@@ -21,6 +23,8 @@
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="#17221F" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellBackground" Color="#1B2824" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellHover" Color="#2C3E36" />
                     <SolidColorBrush x:Key="OpenBreakManagementCard" Color="#20302B" />
                     <SolidColorBrush x:Key="OpenBreakManagementText" Color="#EDF5F0" />
                     <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="#B6C8BF" />
@@ -31,6 +35,7 @@
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="OpenBreakManagementBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="OpenBreakManagementShellBackground" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementCard" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementText" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementSecondaryText" Color="{ThemeResource SystemColorWindowTextColor}" />
@@ -41,6 +46,9 @@
             </ResourceDictionary.ThemeDictionaries>
             <Style x:Key="OpenBreakManagementBackdropStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource OpenBreakManagementBackground}" />
+            </Style>
+            <Style x:Key="OpenBreakManagementShellStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementShellBackground}" />
             </Style>
             <Style x:Key="OpenBreakManagementShellCommandBarStyle" TargetType="Border">
                 <Setter Property="BorderBrush" Value="{ThemeResource OpenBreakManagementStroke}" />

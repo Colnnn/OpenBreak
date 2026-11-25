@@ -4,7 +4,7 @@ internal enum AppearanceTheme { System, Light, Dark }
 internal enum BreakScene { Dusk, Daylight }
 internal enum SceneMotion { FollowWindows, Off }
 internal enum FloatingTimerStyle { Standard, Compact }
-internal enum SurfaceMaterial { Mica, Capture, Warning, Break, Tray, FloatingTimer }
+internal enum SurfaceMaterial { Management, Capture, Warning, Break, Tray, FloatingTimer }
 
 internal sealed record AppearancePreferences(AppearanceTheme Theme, BreakScene Scene,
     SceneMotion Motion = SceneMotion.FollowWindows, bool BreakStartSound = false,

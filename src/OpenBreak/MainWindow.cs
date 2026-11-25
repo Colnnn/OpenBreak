@@ -211,6 +211,7 @@ internal sealed class MainWindow : Window
         FocusHome.ApplyAppearance(state);
         Tasks.ApplyAppearance(state, theme);
         Breaks.ApplyAppearance(state);
+        Capture.ApplyAppearance(state);
         Appearance.ApplyAppearance(state);
     }
 

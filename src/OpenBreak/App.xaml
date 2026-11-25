@@ -19,6 +19,17 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#116B55" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#CCD9D1" />
+                    <SolidColorBrush x:Key="OpenBreakToggleHover" Color="#1D795F" />
+                    <SolidColorBrush x:Key="OpenBreakTogglePressed" Color="#0D5846" />
+                    <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="OpenBreakManagementAccent" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="OpenBreakManagementAccent" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="OpenBreakToggleHover" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPointerOver" ResourceKey="OpenBreakToggleHover" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPressed" ResourceKey="OpenBreakTogglePressed" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPressed" ResourceKey="OpenBreakTogglePressed" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOn" ResourceKey="OpenBreakManagementOnAccent" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPointerOver" ResourceKey="OpenBreakManagementOnAccent" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPressed" ResourceKey="OpenBreakManagementOnAccent" />
                     <Color x:Key="OpenBreakFocusHeroColor">#EBF5EB</Color>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Default">
@@ -31,6 +42,17 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="#83D9B2" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="#172B26" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="#40524A" />
+                    <SolidColorBrush x:Key="OpenBreakToggleHover" Color="#98E3C1" />
+                    <SolidColorBrush x:Key="OpenBreakTogglePressed" Color="#70C69F" />
+                    <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="OpenBreakManagementAccent" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="OpenBreakManagementAccent" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="OpenBreakToggleHover" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPointerOver" ResourceKey="OpenBreakToggleHover" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPressed" ResourceKey="OpenBreakTogglePressed" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPressed" ResourceKey="OpenBreakTogglePressed" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOn" ResourceKey="OpenBreakManagementOnAccent" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPointerOver" ResourceKey="OpenBreakManagementOnAccent" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPressed" ResourceKey="OpenBreakManagementOnAccent" />
                     <Color x:Key="OpenBreakFocusHeroColor">#20372E</Color>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
@@ -42,6 +64,15 @@
                     <SolidColorBrush x:Key="OpenBreakManagementAccent" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementOnAccent" Color="{ThemeResource SystemColorHighlightTextColor}" />
                     <SolidColorBrush x:Key="OpenBreakManagementStroke" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <StaticResource x:Key="ToggleSwitchFillOn" ResourceKey="SystemColorHighlightColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOn" ResourceKey="SystemColorHighlightColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPointerOver" ResourceKey="SystemColorButtonFaceColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPointerOver" ResourceKey="SystemColorButtonTextColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchFillOnPressed" ResourceKey="SystemColorButtonFaceColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchStrokeOnPressed" ResourceKey="SystemColorButtonTextColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOn" ResourceKey="SystemColorHighlightTextColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPointerOver" ResourceKey="SystemColorButtonTextColorBrush" />
+                    <StaticResource x:Key="ToggleSwitchKnobFillOnPressed" ResourceKey="SystemColorButtonTextColorBrush" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
             <Style x:Key="OpenBreakManagementBackdropStyle" TargetType="Border">
@@ -64,6 +95,16 @@
             </Style>
             <Style x:Key="OpenBreakFocusHeroStyle" TargetType="Border" BasedOn="{StaticResource OpenBreakManagementCardStyle}">
                 <Setter Property="CornerRadius" Value="16" />
+            </Style>
+            <Style x:Key="OpenBreakTaskLaneStyle" TargetType="Border" BasedOn="{StaticResource OpenBreakManagementCardStyle}">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementShellBackground}" />
+                <Setter Property="Padding" Value="8" />
+            </Style>
+            <Style x:Key="OpenBreakTaskDialogStyle" TargetType="ContentDialog" BasedOn="{StaticResource DefaultContentDialogStyle}">
+                <Setter Property="Background" Value="{ThemeResource OpenBreakManagementCard}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource OpenBreakManagementStroke}" />
+                <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementText}" />
+                <Setter Property="CornerRadius" Value="12" />
             </Style>
             <Style x:Key="OpenBreakManagementLabelStyle" TargetType="TextBlock">
                 <Setter Property="Foreground" Value="{ThemeResource OpenBreakManagementText}" />

@@ -1,30 +1,21 @@
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation;
-using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
-using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
 
 internal sealed class AppearanceSettingsPage : UserControl
 {
-    private readonly ComboBox theme = new() { Header = "App theme", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly ComboBox scene = new() { Header = "Break scenery", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly ComboBox motion = new() { Header = "Break scene motion", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox theme = new();
+    private readonly ComboBox scene = new();
+    private readonly ComboBox motion = new();
     private readonly ToggleSwitch sound = new();
     private readonly ToggleSwitch trayCountdown = new();
     private readonly ToggleSwitch floatingTimer = new();
-    private readonly ComboBox floatingStyle = new() { Header = "Floating timer style", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox floatingStyle = new();
     private readonly ToggleSwitch floatingOnTop = new();
     private readonly ScenePreview preview = new();
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
-    private readonly Button saveButton = new() { Content = "Save appearance", HorizontalAlignment = HorizontalAlignment.Right };
-    private readonly StackPanel actions = new() { Spacing = SurfaceStyle.ControlGap, HorizontalAlignment = HorizontalAlignment.Right };
-    private readonly StackPanel footer = new()
-    {
-        Spacing = SurfaceStyle.ControlGap,
-        Margin = new Thickness(SurfaceStyle.PageInset, SurfaceStyle.ControlGap, SurfaceStyle.PageInset, SurfaceStyle.ContentGap),
-    };
+    private readonly SettingsLayout layout = new("Appearance");
+    private readonly Button saveButton = ManagementStyle.Button("Save appearance", "AppearanceSave", primary: true);
     private AppearancePreferences saved = AppearancePreferences.Default;
     private AppearanceState systemAppearance = AppearancePolicy.Resolve(AppearancePreferences.Default,
         new AppearanceSystem(false, false, false, 1, 0xFFFFFF, 0));
@@ -47,24 +38,8 @@ internal sealed class AppearanceSettingsPage : UserControl
             floatingStyle.Items.Add(label);
         }
         scene.SelectionChanged += (_, _) => UpdatePreview();
-        LabelToggle(sound, "Play a sound when a break starts");
-        LabelToggle(trayCountdown, "Show countdown in the system tray");
-        LabelToggle(floatingTimer, "Show a floating desktop timer");
-        LabelToggle(floatingOnTop, "Keep the floating timer on top");
         floatingTimer.Toggled += (_, _) => UpdateFloatingControls();
 
-        var sampleTitle = SurfaceStyle.Label("Scene preview", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
-        sampleTitle.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(sampleTitle, AutomationHeadingLevel.Level2);
-        var sample = new StackPanel { Spacing = SurfaceStyle.ControlGap };
-        sample.Children.Add(sampleTitle);
-        sample.Children.Add(Note("Sample timer and task. Windows contrast themes hide scenery."));
-        sample.Children.Add(preview);
-
-        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
-        {
-            saveButton.Style = style;
-        }
         saveButton.Click += (_, _) =>
         {
             var selected = Draft;
@@ -78,38 +53,27 @@ internal sealed class AppearanceSettingsPage : UserControl
                 error.IsOpen = true;
             }
         };
-        var discard = new Button { Content = "Discard changes", HorizontalAlignment = HorizontalAlignment.Right };
-        discard.Click += (_, _) => SetPreferences(saved, loadFailed);
-
-        var form = new StackPanel { Spacing = SurfaceStyle.ContentGap, Margin = new Thickness(SurfaceStyle.PageInset) };
-        form.Children.Add(SurfaceStyle.PageTitle("Appearance"));
-        form.Children.Add(theme);
-        form.Children.Add(scene);
-        form.Children.Add(sample);
-        form.Children.Add(motion);
-        form.Children.Add(sound);
-        form.Children.Add(Note("Plays a short chime for scheduled breaks and break previews when enabled."));
-        var countdown = SurfaceStyle.Label("Countdown visibility", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
-        countdown.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(countdown, AutomationHeadingLevel.Level2);
-        form.Children.Add(countdown);
-        form.Children.Add(trayCountdown);
-        form.Children.Add(floatingTimer);
-        form.Children.Add(floatingStyle);
-        form.Children.Add(floatingOnTop);
-        actions.Children.Add(saveButton);
-        actions.Children.Add(discard);
-        footer.Children.Add(error);
-        footer.Children.Add(actions);
-        footer.SizeChanged += (_, _) => LayoutActions();
-        var root = new Grid();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 760 });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.Children.Add(SurfaceStyle.Scroll(form));
-        Grid.SetRow(footer, 1);
-        root.Children.Add(footer);
-        Content = root;
+        var discard = ManagementStyle.Button("Discard changes", "AppearanceDiscard", () => SetPreferences(saved, loadFailed));
+        var app = SettingsLayout.Group("App appearance",
+            layout.Row("App theme", theme, "AppearanceTheme"));
+        var breakAppearance = SettingsLayout.Group("Break scenery and sound",
+            layout.Row("Break scenery", scene, "AppearanceScene"),
+            layout.Row("Break scene motion", motion, "AppearanceMotion"),
+            layout.Row("Play a sound when a break starts", sound, "AppearanceSound",
+                "Plays a short chime for scheduled breaks and break previews when enabled."));
+        var sample = SettingsLayout.Group("Scene preview",
+            ManagementStyle.BodyText("Sample timer and task. Windows contrast themes hide scenery."), preview);
+        var countdown = SettingsLayout.Group("Countdown visibility",
+            layout.Row("Show countdown in the system tray", trayCountdown, "AppearanceTrayCountdown"),
+            layout.Row("Show a floating desktop timer", floatingTimer, "AppearanceFloatingTimer"),
+            layout.Row("Floating timer style", floatingStyle, "AppearanceFloatingStyle"),
+            layout.Row("Keep the floating timer on top", floatingOnTop, "AppearanceFloatingOnTop"));
+        layout.Form.Children.Add(ManagementStyle.Card(app));
+        layout.Form.Children.Add(ManagementStyle.Card(breakAppearance));
+        layout.Form.Children.Add(ManagementStyle.Card(sample));
+        layout.Form.Children.Add(ManagementStyle.Card(countdown));
+        layout.SetFooter(SettingsLayout.Footer(error, saveButton, discard));
+        Content = layout;
         SetPreferences(saved);
     }
 
@@ -124,12 +88,8 @@ internal sealed class AppearanceSettingsPage : UserControl
     {
         systemAppearance = state;
         UpdatePreview();
-        LayoutActions();
+        layout.ApplyAppearance(state);
     }
-
-    private void LayoutActions() =>
-        actions.Orientation = footer.ActualWidth < 355 * systemAppearance.TextScale
-            ? Orientation.Vertical : Orientation.Horizontal;
 
     private void UpdatePreview()
     {
@@ -164,18 +124,5 @@ internal sealed class AppearanceSettingsPage : UserControl
     private void UpdateFloatingControls()
     {
         floatingStyle.IsEnabled = floatingOnTop.IsEnabled = !loadFailed && floatingTimer.IsOn;
-    }
-
-    private static void LabelToggle(ToggleSwitch toggle, string label)
-    {
-        toggle.Header = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap };
-        AutomationProperties.SetName(toggle, label);
-    }
-
-    private static TextBlock Note(string text)
-    {
-        var label = SurfaceStyle.SecondaryLabel(text, SurfaceStyle.Body);
-        label.TextWrapping = TextWrapping.Wrap;
-        return label;
     }
 }

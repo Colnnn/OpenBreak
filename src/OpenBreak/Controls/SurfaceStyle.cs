@@ -106,16 +106,31 @@ internal static class ManagementStyle
     internal const double SectionGap = 24;
     internal const double TimerSize = 64;
 
-    internal static Button Button(string text, string automationId, Action click, bool link = false)
+    internal static Thickness PageMargin(double width) => new(width < 660 ? NarrowInset : WideInset);
+
+    internal static Border Card(UIElement? content = null) => new()
+    {
+        Style = SurfaceStyle.GetStyle("OpenBreakManagementCardStyle"),
+        Child = content,
+    };
+
+    internal static Button Button(string text, string automationId, Action click, bool link = false, bool primary = false)
+    {
+        var button = Button(text, automationId, link, primary);
+        button.Click += (_, _) => click();
+        return button;
+    }
+
+    internal static Button Button(string text, string automationId, bool link = false, bool primary = false)
     {
         var button = new Button
         {
             Content = new TextBlock { TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
-            Style = SurfaceStyle.GetStyle(link ? "OpenBreakManagementLinkButtonStyle" : "OpenBreakManagementButtonStyle"),
+            Style = SurfaceStyle.GetStyle(primary ? "OpenBreakManagementPrimaryButtonStyle" :
+                link ? "OpenBreakManagementLinkButtonStyle" : "OpenBreakManagementButtonStyle"),
         };
         AutomationProperties.SetAutomationId(button, automationId);
         SetButtonText(button, text);
-        button.Click += (_, _) => click();
         return button;
     }
 
@@ -137,6 +152,50 @@ internal static class ManagementStyle
         label.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetHeadingLevel(label, heading);
         return label;
+    }
+
+    internal static TextBlock SectionHeading(string text) =>
+        Label(text, SurfaceStyle.SectionTitle, heading: AutomationHeadingLevel.Level2);
+
+    internal static TextBlock BodyText(string text) => Label(text, SurfaceStyle.Body, supporting: true);
+
+    internal static void ApplyContrast(UIElement element, AppearanceState state)
+    {
+        switch (element)
+        {
+            case Border border:
+                if (ReferenceEquals(border.Style, SurfaceStyle.GetStyle("OpenBreakManagementCardStyle")) ||
+                    ReferenceEquals(border.Style, SurfaceStyle.GetStyle("OpenBreakTaskLaneStyle")))
+                {
+                    if (state.HighContrast)
+                    {
+                        border.Background = SurfaceStyle.Brush(state.WindowColor);
+                        border.BorderBrush = SurfaceStyle.Brush(state.TextColor);
+                    }
+                    else
+                    {
+                        border.ClearValue(Border.BackgroundProperty);
+                        border.ClearValue(Border.BorderBrushProperty);
+                    }
+                }
+                if (border.Child is { } child)
+                {
+                    ApplyContrast(child, state);
+                }
+                break;
+            case Panel panel:
+                foreach (var item in panel.Children)
+                {
+                    ApplyContrast(item, state);
+                }
+                break;
+            case ScrollViewer { Content: UIElement content }:
+                ApplyContrast(content, state);
+                break;
+            case TextBlock label:
+                SurfaceStyle.ApplyContrast(label, state);
+                break;
+        }
     }
 }
 

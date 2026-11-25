@@ -7,7 +7,6 @@ using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.System;
-using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
 
@@ -30,14 +29,14 @@ internal sealed class TasksPage : UserControl
     private readonly Grid root;
     private readonly Grid columns;
     private readonly Grid header;
-    private readonly StackPanel headerActions;
+    private readonly ActionRow headerActions;
     private readonly TextBlock heading;
     private readonly Button addButton;
     private readonly Button archiveButton;
     private readonly ScrollViewer scroll;
     private readonly InfoBar error;
     private readonly Button retry;
-    private readonly Border inlineEditor;
+    private readonly Grid inlineEditor;
     private readonly TextBox draftTitle = new() { Header = "Title", MaxLength = TaskStore.TitleLimit };
     private readonly TextBox draftNextStep = new() { Header = "Next step (optional)", MaxLength = TaskStore.NextStepLimit };
     private readonly InfoBar draftError = new() { Severity = InfoBarSeverity.Error, IsClosable = false };
@@ -48,6 +47,7 @@ internal sealed class TasksPage : UserControl
     private bool lanesStacked;
     private long? draggedTask;
     private double textScale = 1;
+    private AppearanceState? appearance;
     private ElementTheme dialogTheme;
     private ContentDialog? activeDialog;
     private MenuFlyout? openMenu;
@@ -62,19 +62,15 @@ internal sealed class TasksPage : UserControl
     {
         this.store = store;
 
-        heading = SurfaceStyle.PageTitle("Tasks");
-        addButton = new Button { Content = "Add task", VerticalAlignment = VerticalAlignment.Center };
-        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
-        {
-            addButton.Style = style;
-        }
-        addButton.Click += (_, _) => OpenInlineEditor(focus: true);
-        archiveButton = new Button { Content = "Archive", VerticalAlignment = VerticalAlignment.Center };
+        heading = ManagementStyle.Label("Tasks", SurfaceStyle.PageTitleSize, heading: AutomationHeadingLevel.Level1);
+        heading.VerticalAlignment = VerticalAlignment.Center;
+        addButton = ManagementStyle.Button("Add task", "TasksAdd", () => OpenInlineEditor(focus: true), primary: true);
+        archiveButton = ManagementStyle.Button("Archive", "TasksArchive", () => ShowArchive(!archived));
 
-        headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SurfaceStyle.ControlGap };
+        headerActions = new ActionRow { HorizontalAlignment = HorizontalAlignment.Right };
         headerActions.Children.Add(archiveButton);
         headerActions.Children.Add(addButton);
-        header = new Grid { ColumnSpacing = SurfaceStyle.ContentGap, RowSpacing = SurfaceStyle.ControlGap };
+        header = new Grid { ColumnSpacing = SurfaceStyle.SectionGap, RowSpacing = SurfaceStyle.ControlGap };
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -82,32 +78,20 @@ internal sealed class TasksPage : UserControl
         header.Children.Add(heading);
         Grid.SetColumn(headerActions, 1);
         header.Children.Add(headerActions);
-        header.SizeChanged += (_, _) => LayoutHeader();
-
-        retry = new Button { Content = "Retry" };
-        retry.Click += (_, _) => retryChange?.Invoke();
+        retry = ManagementStyle.Button("Retry", "TasksRetry", () => retryChange?.Invoke());
         error = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false, Title = "Task storage" };
 
-        var save = new Button { Content = "Save task", Style = addButton.Style };
-        save.Click += (_, _) => SaveInlineDraft(focus: true);
-        var cancel = new Button { Content = "Cancel" };
-        cancel.Click += (_, _) => CancelInlineDraft(focus: true);
-        var editorHeading = SurfaceStyle.Label("New task", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
-        AutomationProperties.SetHeadingLevel(editorHeading, AutomationHeadingLevel.Level2);
-        var editor = new StackPanel { Spacing = SurfaceStyle.ControlGap };
-        editor.Children.Add(editorHeading);
-        editor.Children.Add(draftTitle);
-        editor.Children.Add(draftNextStep);
-        editor.Children.Add(draftError);
-        var editorActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = SurfaceStyle.ControlGap };
+        AutomationProperties.SetAutomationId(draftTitle, "TasksDraftTitle");
+        AutomationProperties.SetAutomationId(draftNextStep, "TasksDraftNextStep");
+        var save = ManagementStyle.Button("Save task", "TasksSave", () => SaveInlineDraft(focus: true), primary: true);
+        var cancel = ManagementStyle.Button("Cancel", "TasksCancel", () => CancelInlineDraft(focus: true));
+        var editorActions = new ActionRow();
         editorActions.Children.Add(save);
         editorActions.Children.Add(cancel);
-        editor.Children.Add(editorActions);
-        editorActions.SizeChanged += (_, args) => editorActions.Orientation = args.NewSize.Width < 220 * textScale
-            ? Orientation.Vertical : Orientation.Horizontal;
-        inlineEditor = SurfaceStyle.Panel();
-        inlineEditor.Child = editor;
-        inlineEditor.Visibility = Visibility.Collapsed;
+        var editor = SettingsLayout.Group("New task", draftTitle, draftNextStep, draftError, editorActions);
+        inlineEditor = new Grid { Visibility = Visibility.Collapsed };
+        inlineEditor.ColumnDefinitions.Add(new ColumnDefinition { MaxWidth = 640 });
+        inlineEditor.Children.Add(ManagementStyle.Card(editor));
         draftTitle.KeyDown += SaveOnEnter;
         draftNextStep.KeyDown += SaveOnEnter;
         inlineEditor.KeyDown += (_, args) =>
@@ -119,18 +103,21 @@ internal sealed class TasksPage : UserControl
             }
         };
 
-        columns = new Grid { ColumnSpacing = SurfaceStyle.ContentGap };
+        columns = new Grid { ColumnSpacing = SurfaceStyle.SectionGap };
         for (var index = 0; index < Columns.Length; index++)
         {
             columns.ColumnDefinitions.Add(new ColumnDefinition());
             columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            lanes[index] = SurfaceStyle.Panel();
+            lanes[index] = new Border
+            {
+                Style = SurfaceStyle.GetStyle("OpenBreakTaskLaneStyle"),
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            AutomationProperties.SetAutomationId(lanes[index], $"TasksLane{Columns[index].Status}");
             Grid.SetColumn(lanes[index], index);
             columns.Children.Add(lanes[index]);
         }
-        columns.SizeChanged += (_, args) => LayoutLanes(args.NewSize.Width < 690 * textScale);
-
-        var board = new StackPanel { Spacing = SurfaceStyle.SectionGap };
+        var board = new StackPanel { Spacing = ManagementStyle.SectionGap };
         board.Children.Add(inlineEditor);
         board.Children.Add(columns);
         scroll = new ScrollViewer
@@ -140,17 +127,19 @@ internal sealed class TasksPage : UserControl
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
-        archiveButton.Click += (_, _) => ShowArchive(!archived);
-        root = new Grid { Padding = new Thickness(SurfaceStyle.PageInset), RowSpacing = SurfaceStyle.SectionGap };
+        root = new Grid { Padding = ManagementStyle.PageMargin(0) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition());
+        header.Margin = new Thickness(0, 0, 0, ManagementStyle.SectionGap);
         root.Children.Add(header);
         Grid.SetRow(error, 1);
         root.Children.Add(error);
         Grid.SetRow(scroll, 2);
         root.Children.Add(scroll);
         Content = root;
+        SizeChanged += (_, args) => LayoutBoard(args.NewSize.Width);
+        LayoutBoard(0);
     }
 
     internal bool HasModalEditor => activeDialog is not null;
@@ -165,22 +154,23 @@ internal sealed class TasksPage : UserControl
         {
             activeDialog.RequestedTheme = theme;
         }
-        if (state.TextScale == textScale)
-        {
-            return;
-        }
-
+        appearance = state;
         textScale = state.TextScale;
-        LayoutHeader();
-        LayoutLanes(columns.ActualWidth < 690 * textScale);
+        LayoutBoard(ActualWidth);
+        ManagementStyle.ApplyContrast(root, state);
     }
 
-    private void LayoutHeader()
+    private void LayoutBoard(double width)
     {
-        var stack = header.ActualWidth < 330 * textScale;
+        root.Padding = ManagementStyle.PageMargin(width);
+        var contentWidth = width - 2 * root.Padding.Left;
+        var stack = contentWidth < 350 * textScale;
         Grid.SetColumn(headerActions, stack ? 0 : 1);
+        Grid.SetColumnSpan(headerActions, stack ? 2 : 1);
         Grid.SetRow(headerActions, stack ? 1 : 0);
-        headerActions.Orientation = header.ActualWidth < 185 * textScale ? Orientation.Vertical : Orientation.Horizontal;
+        headerActions.HorizontalAlignment = stack ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        Grid.SetColumnSpan(heading, stack ? 2 : 1);
+        LayoutLanes(contentWidth < 690 * textScale);
     }
 
     internal void CloseEditor() => activeDialog?.Hide();
@@ -275,7 +265,7 @@ internal sealed class TasksPage : UserControl
         focusGeneration++;
         archived = show;
         heading.Text = archived ? "Archive" : "Tasks";
-        archiveButton.Content = archived ? "Back to board" : "Archive";
+        ManagementStyle.SetButtonText(archiveButton, archived ? "Back to board" : "Archive");
         addButton.Visibility = archived ? Visibility.Collapsed : Visibility.Visible;
         inlineEditor.Visibility = !archived && draftOpen ? Visibility.Visible : Visibility.Collapsed;
         Refresh();
@@ -368,8 +358,8 @@ internal sealed class TasksPage : UserControl
         }
 
         lanesStacked = stack;
-        columns.ColumnSpacing = stack ? 0 : SurfaceStyle.ContentGap;
-        columns.RowSpacing = stack ? SurfaceStyle.ContentGap : 0;
+        columns.ColumnSpacing = stack ? 0 : SurfaceStyle.SectionGap;
+        columns.RowSpacing = stack ? SurfaceStyle.SectionGap : 0;
         for (var index = 0; index < lanes.Length; index++)
         {
             Grid.SetColumn(lanes[index], stack ? 0 : index);
@@ -385,12 +375,24 @@ internal sealed class TasksPage : UserControl
         for (var column = 0; column < Columns.Length; column++)
         {
             var (status, label) = Columns[column];
-            var title = SurfaceStyle.Label(label, SurfaceStyle.SectionTitle, FontWeights.SemiBold);
-            title.TextWrapping = TextWrapping.Wrap;
-            AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level2);
-            var lane = new StackPanel { Spacing = SurfaceStyle.ControlGap, MinHeight = 96, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
-            lane.Children.Add(title);
             var columnTasks = tasks.Where(task => task.Status == status).ToArray();
+            var title = ManagementStyle.SectionHeading(label);
+            var count = ManagementStyle.Label(columnTasks.Length.ToString(), SurfaceStyle.Caption, supporting: true);
+            count.VerticalAlignment = VerticalAlignment.Center;
+            AutomationProperties.SetName(count, columnTasks.Length == 1 ? "1 task" : $"{columnTasks.Length} tasks");
+            var laneHeader = new Grid { Padding = new Thickness(SurfaceStyle.ControlGap), ColumnSpacing = SurfaceStyle.ControlGap };
+            laneHeader.ColumnDefinitions.Add(new ColumnDefinition());
+            laneHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            laneHeader.Children.Add(title);
+            Grid.SetColumn(count, 1);
+            laneHeader.Children.Add(count);
+            var lane = new StackPanel
+            {
+                Spacing = SurfaceStyle.ControlGap,
+                MinHeight = 96,
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            };
+            lane.Children.Add(laneHeader);
             var cards = new List<(long Id, Border Element)>();
             for (var index = 0; index < columnTasks.Length; index++)
             {
@@ -409,8 +411,8 @@ internal sealed class TasksPage : UserControl
                     (false, TaskStatus.InProgress) => "Move a task here when you start it.",
                     _ => "Move finished tasks here.",
                 };
-                var hint = SurfaceStyle.SecondaryLabel(empty, SurfaceStyle.Body);
-                hint.TextWrapping = TextWrapping.Wrap;
+                var hint = ManagementStyle.BodyText(empty);
+                hint.Margin = new Thickness(SurfaceStyle.ControlGap, 0, SurfaceStyle.ControlGap, SurfaceStyle.ControlGap);
                 lane.Children.Add(hint);
             }
 
@@ -420,12 +422,15 @@ internal sealed class TasksPage : UserControl
                 EnableDrop(lane, status, cards);
             }
         }
+        if (appearance is { } state)
+        {
+            ManagementStyle.ApplyContrast(columns, state);
+        }
     }
 
     private Border CreateCard(BoardTask task, bool canMoveUp, bool canMoveDown)
     {
-        var title = SurfaceStyle.Label(task.Title, SurfaceStyle.StrongBody, FontWeights.SemiBold);
-        title.TextWrapping = TextWrapping.Wrap;
+        var title = ManagementStyle.Label(task.Title, SurfaceStyle.StrongBody);
         var body = new StackPanel { Spacing = SurfaceStyle.ControlGap };
         if (archived)
         {
@@ -433,9 +438,17 @@ internal sealed class TasksPage : UserControl
         }
         else
         {
-            var actions = new Button { Content = new SymbolIcon(Symbol.More), VerticalAlignment = VerticalAlignment.Top };
+            var actions = new Button
+            {
+                Content = new SymbolIcon(Symbol.More),
+                Style = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
+                MinWidth = 36,
+                Padding = new Thickness(6),
+                VerticalAlignment = VerticalAlignment.Top,
+            };
             actions.Flyout = CreateActionsMenu(task, actions, canMoveUp, canMoveDown);
             AutomationProperties.SetName(actions, $"Actions for {task.Title}");
+            AutomationProperties.SetAutomationId(actions, $"TasksActions{task.Id}");
             ToolTipService.SetToolTip(actions, "Task actions");
             taskActions.Add((task.Id, CardAction.Actions), actions);
 
@@ -449,13 +462,12 @@ internal sealed class TasksPage : UserControl
         }
         if (task.NextStep is { } nextStep)
         {
-            var note = SurfaceStyle.SecondaryLabel(nextStep, SurfaceStyle.Body);
-            note.TextWrapping = TextWrapping.Wrap;
+            var note = ManagementStyle.BodyText(nextStep);
             body.Children.Add(note);
         }
         if (archived)
         {
-            var restore = new Button { Content = "Restore" };
+            var restore = ManagementStyle.Button("Restore", $"TasksRestore{task.Id}");
             AutomationProperties.SetName(restore, $"Restore {task.Title}");
             restore.Click += (_, _) => ApplyChange(() => store.SetArchived(task.Id, archived: false),
                 new ActionOrigin(new CardFocus(task.Id, CardAction.Restore, restore.FocusState), ++focusGeneration));
@@ -463,8 +475,7 @@ internal sealed class TasksPage : UserControl
             taskActions.Add((task.Id, CardAction.Restore), restore);
         }
 
-        var card = SurfaceStyle.Panel(body);
-        card.CornerRadius = SurfaceStyle.CardCorner;
+        var card = ManagementStyle.Card(body);
         if (!archived)
         {
             card.CanDrag = true;
@@ -624,14 +635,21 @@ internal sealed class TasksPage : UserControl
         form.Children.Add(feedback);
         var dialog = new ContentDialog
         {
+            Style = SurfaceStyle.GetStyle("OpenBreakTaskDialogStyle"),
             XamlRoot = root.XamlRoot,
             RequestedTheme = dialogTheme,
             Title = "Edit task",
             Content = form,
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
+            PrimaryButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementPrimaryButtonStyle"),
+            CloseButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
             DefaultButton = ContentDialogButton.Primary,
         };
+        dialog.Resources["ContentDialogTopOverlay"] = SurfaceStyle.Brush(0, 0);
+        AutomationProperties.SetAutomationId(dialog, "TasksEditDialog");
+        AutomationProperties.SetAutomationId(title, "TasksEditTitle");
+        AutomationProperties.SetAutomationId(nextStep, "TasksEditNextStep");
         dialog.Opened += (_, _) =>
         {
             if (CanRestoreFocus?.Invoke() == true)

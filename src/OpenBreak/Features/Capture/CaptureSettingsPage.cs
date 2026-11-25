@@ -1,18 +1,16 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation;
-using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
-using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
 
 internal sealed class CaptureSettingsPage : UserControl
 {
-    private readonly TextBox chord = new() { Header = "Capture shortcut", MaxLength = 40 };
-    private readonly TextBlock status = SurfaceStyle.SecondaryLabel("", SurfaceStyle.Body);
+    private readonly TextBox chord = new() { MaxLength = 40 };
+    private readonly TextBlock status = ManagementStyle.BodyText("");
     private readonly InfoBar error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
-    private readonly Button openGuide = new() { Content = "Getting started" };
-    private readonly StackPanel guide = new() { Spacing = SurfaceStyle.ContentGap };
+    private readonly Button openGuide;
+    private readonly Border guide;
+    private readonly SettingsLayout layout = new("Capture");
     private readonly ComboBox breakDisplay = ReminderSettingsPage.CreateBreakDisplaySelector();
     private readonly InfoBar guideError = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly Button? guideBreaks;
@@ -24,40 +22,30 @@ internal sealed class CaptureSettingsPage : UserControl
         Func<BreakDisplay, string?> saveAndPreview, Action<ManagementPage>? navigate = null)
     {
         this.apply = apply;
-        var title = SurfaceStyle.PageTitle("Capture");
-        status.TextWrapping = TextWrapping.Wrap;
-        var applyButton = new Button { Content = "Apply shortcut" };
-        if (Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accent) && accent is Style style)
-        {
-            applyButton.Style = style;
-        }
-        applyButton.Click += (_, _) => Apply();
-        var discard = new Button { Content = "Discard shortcut changes" };
-        discard.Click += (_, _) =>
+        var applyButton = ManagementStyle.Button("Apply shortcut", "CaptureApply", Apply, primary: true);
+        var discard = ManagementStyle.Button("Discard shortcut changes", "CaptureDiscard", () =>
         {
             chord.Text = savedShortcut.ToString();
             error.IsOpen = false;
-        };
+        });
 
-        var guideTitle = SurfaceStyle.Label("Getting started", SurfaceStyle.SectionTitle, FontWeights.SemiBold);
-        guideTitle.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetHeadingLevel(guideTitle, AutomationHeadingLevel.Level2);
-        guide.Children.Add(guideTitle);
-        guide.Children.Add(BodyText("Set your work and break durations in Breaks."));
+        var guideContent = SettingsLayout.Group("Getting started",
+            ManagementStyle.BodyText("Set your work and break durations in Breaks."));
+        guide = ManagementStyle.Card(guideContent);
+        openGuide = ManagementStyle.Button("Getting started", "CaptureOpenGuide", () => OpenGuide(focus: true));
         if (navigate is not null)
         {
-            guideBreaks = GuideLink("Open Breaks", ManagementPage.Breaks);
-            guide.Children.Add(guideBreaks);
+            guideBreaks = ManagementStyle.Button("Open Breaks", "CaptureGuideBreaks", () => navigate(ManagementPage.Breaks), link: true);
+            guideContent.Children.Add(guideBreaks);
         }
-        guide.Children.Add(BodyText("Choose Add task in Tasks to write a title and an optional next step. Press Enter to save or Escape to cancel. Use your capture shortcut to save a task from another app."));
+        guideContent.Children.Add(ManagementStyle.BodyText("Choose Add task in Tasks to write a title and an optional next step. Press Enter to save or Escape to cancel. Use your capture shortcut to save a task from another app."));
         if (navigate is not null)
         {
-            guide.Children.Add(GuideLink("Open Tasks", ManagementPage.Tasks));
+            guideContent.Children.Add(ManagementStyle.Button("Open Tasks", "CaptureGuideTasks", () => navigate(ManagementPage.Tasks), link: true));
         }
-        guide.Children.Add(breakDisplay);
-        guide.Children.Add(BodyText("A 10-second warning comes before the 10-second preview."));
-        var preview = new Button { Content = "Save and preview" };
-        preview.Click += (_, _) =>
+        guideContent.Children.Add(layout.Row("Break display", breakDisplay, "CaptureGuideDisplay",
+            "A 10-second warning comes before the 10-second preview."));
+        var preview = ManagementStyle.Button("Save and preview", "CaptureGuidePreview", () =>
         {
             if (saveAndPreview((BreakDisplay)breakDisplay.SelectedIndex) is { } failure)
             {
@@ -68,19 +56,15 @@ internal sealed class CaptureSettingsPage : UserControl
             {
                 guideError.IsOpen = false;
             }
-        };
-        guide.Children.Add(preview);
-        guide.Children.Add(guideError);
-        var discardDisplay = new Button { Content = "Discard display change" };
-        discardDisplay.Click += (_, _) =>
+        }, primary: true);
+        var discardDisplay = ManagementStyle.Button("Discard display change", "CaptureGuideDiscard", () =>
         {
             breakDisplay.SelectedIndex = (int)savedDisplay;
             guideError.IsOpen = false;
-        };
-        guide.Children.Add(discardDisplay);
-        guide.Children.Add(BodyText("When you’re ready for scheduled breaks, choose Start focus on the Focus page. Closing this window keeps OpenBreak running in the tray. Choose Quit OpenBreak from the tray to stop it."));
-        var dismiss = new Button { Content = "Got it" };
-        dismiss.Click += (_, _) =>
+        });
+        guideContent.Children.Add(SettingsLayout.Footer(guideError, preview, discardDisplay));
+        guideContent.Children.Add(ManagementStyle.BodyText("When you’re ready for scheduled breaks, choose Start focus on the Focus page. Closing this window keeps OpenBreak running in the tray. Choose Quit OpenBreak from the tray to stop it."));
+        var dismiss = ManagementStyle.Button("Got it", "CaptureGuideDismiss", () =>
         {
             if (dismissGuide())
             {
@@ -92,29 +76,20 @@ internal sealed class CaptureSettingsPage : UserControl
             {
                 Report("Couldn’t save this preference. Try again.");
             }
-        };
-        guide.Children.Add(dismiss);
-        openGuide.Click += (_, _) => OpenGuide(focus: true);
+        });
+        guideContent.Children.Add(dismiss);
 
-        var form = new StackPanel { Spacing = SurfaceStyle.ContentGap, Margin = new Thickness(SurfaceStyle.PageInset) };
-        form.Children.Add(title);
-        form.Children.Add(status);
-        form.Children.Add(chord);
-        form.Children.Add(BodyText("Type a shortcut such as Ctrl+Shift+K. Use two or three modifiers (Ctrl, Alt, Shift) and a letter, digit or F1–F11."));
-        form.Children.Add(applyButton);
-        form.Children.Add(discard);
-        form.Children.Add(error);
-        form.Children.Add(openGuide);
-        form.Children.Add(guide);
-        Content = SurfaceStyle.Scroll(form);
-
-        Button GuideLink(string label, ManagementPage page)
-        {
-            var button = new Button { Content = label };
-            button.Click += (_, _) => navigate?.Invoke(page);
-            return button;
-        }
+        var shortcut = SettingsLayout.Group("Shortcut", status,
+            layout.Row("Capture shortcut", chord, "CaptureChord",
+                "Type a shortcut such as Ctrl+Shift+K. Use two or three modifiers (Ctrl, Alt, Shift) and a letter, digit or F1–F11."));
+        layout.Form.Children.Add(ManagementStyle.Card(shortcut));
+        layout.Form.Children.Add(openGuide);
+        layout.Form.Children.Add(guide);
+        layout.SetFooter(SettingsLayout.Footer(error, applyButton, discard));
+        Content = layout;
     }
+
+    internal void ApplyAppearance(AppearanceState state) => layout.ApplyAppearance(state);
 
     internal bool GuideVisible => guide.Visibility == Visibility.Visible;
     internal bool IsDirty => chord.Text != savedShortcut.ToString() ||
@@ -190,12 +165,5 @@ internal sealed class CaptureSettingsPage : UserControl
     {
         error.Message = message;
         error.IsOpen = true;
-    }
-
-    private static TextBlock BodyText(string text)
-    {
-        var block = SurfaceStyle.SecondaryLabel(text, SurfaceStyle.Body);
-        block.TextWrapping = TextWrapping.Wrap;
-        return block;
     }
 }

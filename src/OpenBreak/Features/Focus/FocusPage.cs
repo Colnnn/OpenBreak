@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Shapes;
-using Windows.Foundation;
 using FontWeights = Microsoft.UI.Text.FontWeights;
 
 namespace OpenBreak;
@@ -232,8 +231,8 @@ internal sealed class FocusPage : UserControl
 
     private void LayoutPage(double width)
     {
-        var inset = width < 660 ? ManagementStyle.NarrowInset : ManagementStyle.WideInset;
-        body.Margin = new Thickness(inset);
+        body.Margin = ManagementStyle.PageMargin(width);
+        var inset = body.Margin.Left;
         var wideHero = width >= 600 * textScale;
         timerContent.Margin = new Thickness(wideHero ? 40 : ManagementStyle.NarrowInset, ManagementStyle.SectionGap,
             wideHero ? 40 : ManagementStyle.NarrowInset, ManagementStyle.SectionGap);
@@ -345,47 +344,4 @@ internal sealed class FocusPage : UserControl
         }
     }
 
-    // Measure native buttons at their actual text size so the same controls can move to a new row.
-    private sealed class ActionRow : Panel
-    {
-        protected override Size MeasureOverride(Size availableSize) => Layout(availableSize.Width, arrange: false);
-
-        protected override Size ArrangeOverride(Size finalSize)
-        {
-            Layout(finalSize.Width, arrange: true);
-            return finalSize;
-        }
-
-        private Size Layout(double width, bool arrange)
-        {
-            double rowWidth = 0, rowHeight = 0, blockWidth = 0, y = 0;
-            foreach (var child in Children)
-            {
-                if (child.Visibility == Visibility.Collapsed)
-                {
-                    continue;
-                }
-                if (!arrange)
-                {
-                    child.Measure(new Size(width, double.PositiveInfinity));
-                }
-                var size = child.DesiredSize;
-                var x = rowWidth == 0 ? 0 : rowWidth + SurfaceStyle.ControlGap;
-                if (rowWidth > 0 && x + size.Width > width)
-                {
-                    y += rowHeight + SurfaceStyle.ControlGap;
-                    rowHeight = 0;
-                    x = 0;
-                }
-                if (arrange)
-                {
-                    child.Arrange(new Rect(x, y, Math.Min(size.Width, width), size.Height));
-                }
-                rowWidth = x + size.Width;
-                rowHeight = Math.Max(rowHeight, size.Height);
-                blockWidth = Math.Max(blockWidth, rowWidth);
-            }
-            return new Size(blockWidth, y + rowHeight);
-        }
-    }
 }

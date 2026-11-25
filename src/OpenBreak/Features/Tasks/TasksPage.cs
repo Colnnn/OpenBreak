@@ -12,7 +12,7 @@ namespace OpenBreak;
 
 internal sealed class TasksPage : UserControl
 {
-    internal enum CardAction { Actions, Restore }
+    internal enum CardAction { Actions, Restore, Delete }
 
     internal readonly record struct CardFocus(long TaskId, CardAction Action, FocusState State);
     private readonly record struct ActionOrigin(CardFocus Card, long Generation);
@@ -50,6 +50,7 @@ internal sealed class TasksPage : UserControl
     private AppearanceState? appearance;
     private ElementTheme dialogTheme;
     private ContentDialog? activeDialog;
+    private bool dismissDialogOnLeave;
     private MenuFlyout? openMenu;
     private CardFocus? menuOwner;
     private int menusAwaitingClose;
@@ -179,6 +180,10 @@ internal sealed class TasksPage : UserControl
     {
         focusGeneration++;
         openMenu?.Hide();
+        if (dismissDialogOnLeave)
+        {
+            CloseEditor();
+        }
     }
 
     internal void OpenInlineEditor(bool focus = false)
@@ -407,9 +412,9 @@ internal sealed class TasksPage : UserControl
                 var empty = (archived, status) switch
                 {
                     (true, _) => "No archived tasks",
-                    (false, TaskStatus.ToDo) => "Use Add task to capture your next step.",
-                    (false, TaskStatus.InProgress) => "Move a task here when you start it.",
-                    _ => "Move finished tasks here.",
+                    (false, TaskStatus.ToDo) => "Add a task",
+                    (false, TaskStatus.InProgress) => "Start a task",
+                    _ => "Complete a task",
                 };
                 var hint = ManagementStyle.BodyText(empty);
                 hint.Margin = new Thickness(SurfaceStyle.ControlGap, 0, SurfaceStyle.ControlGap, SurfaceStyle.ControlGap);
@@ -471,8 +476,18 @@ internal sealed class TasksPage : UserControl
             AutomationProperties.SetName(restore, $"Restore {task.Title}");
             restore.Click += (_, _) => ApplyChange(() => store.SetArchived(task.Id, archived: false),
                 new ActionOrigin(new CardFocus(task.Id, CardAction.Restore, restore.FocusState), ++focusGeneration));
-            body.Children.Add(restore);
             taskActions.Add((task.Id, CardAction.Restore), restore);
+
+            var delete = ManagementStyle.Button("Delete", $"TasksDelete{task.Id}");
+            AutomationProperties.SetName(delete, $"Delete {task.Title}");
+            delete.Click += async (_, _) => await ConfirmDelete(task,
+                new ActionOrigin(new CardFocus(task.Id, CardAction.Delete, delete.FocusState), ++focusGeneration));
+            taskActions.Add((task.Id, CardAction.Delete), delete);
+
+            var actions = new ActionRow();
+            actions.Children.Add(restore);
+            actions.Children.Add(delete);
+            body.Children.Add(actions);
         }
 
         var card = ManagementStyle.Card(body);
@@ -680,7 +695,65 @@ internal sealed class TasksPage : UserControl
             }
         };
 
+        await ShowTaskDialog(dialog, origin);
+    }
+
+    private async Task ConfirmDelete(BoardTask task, ActionOrigin origin)
+    {
+        if (origin.Generation != focusGeneration || HasModalEditor || !archived || CanRestoreFocus?.Invoke() != true)
+        {
+            return;
+        }
+
+        var warning = ManagementStyle.BodyText($"“{task.Title}” will be permanently deleted. This can’t be undone.");
+        var feedback = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };
+        var content = new StackPanel { Spacing = SurfaceStyle.ContentGap };
+        content.Children.Add(warning);
+        content.Children.Add(feedback);
+        var dialog = new ContentDialog
+        {
+            Style = SurfaceStyle.GetStyle("OpenBreakTaskDialogStyle"),
+            XamlRoot = root.XamlRoot,
+            RequestedTheme = dialogTheme,
+            Title = "Delete task?",
+            Content = content,
+            PrimaryButtonText = "Delete",
+            CloseButtonText = "Cancel",
+            PrimaryButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
+            CloseButtonStyle = SurfaceStyle.GetStyle("OpenBreakManagementButtonStyle"),
+            DefaultButton = ContentDialogButton.Close,
+        };
+        dialog.Resources["ContentDialogTopOverlay"] = SurfaceStyle.Brush(0, 0);
+        AutomationProperties.SetAutomationId(dialog, "TasksDeleteDialog");
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (origin.Generation != focusGeneration || !archived || CanRestoreFocus?.Invoke() != true)
+            {
+                feedback.Message = "The task view changed. Cancel and reopen the confirmation.";
+                feedback.IsOpen = true;
+                args.Cancel = true;
+                return;
+            }
+
+            try
+            {
+                store.DeleteArchived(task.Id);
+            }
+            catch (Exception exception) when (TaskStore.IsStorageError(exception))
+            {
+                feedback.Message = "Couldn’t delete this task. Try again or cancel.";
+                feedback.IsOpen = true;
+                args.Cancel = true;
+            }
+        };
+
+        await ShowTaskDialog(dialog, origin, dismissOnLeave: true);
+    }
+
+    private async Task ShowTaskDialog(ContentDialog dialog, ActionOrigin origin, bool dismissOnLeave = false)
+    {
         activeDialog = dialog;
+        dismissDialogOnLeave = dismissOnLeave;
         ContentDialogResult result;
         try
         {
@@ -688,6 +761,7 @@ internal sealed class TasksPage : UserControl
         }
         finally
         {
+            dismissDialogOnLeave = false;
             activeDialog = null;
         }
         if (result == ContentDialogResult.Primary)

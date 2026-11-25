@@ -28,6 +28,8 @@ internal static class Program
             CheckRenameCompatibility(temporary.FullName);
             RoundTrip(Path.Combine(temporary.FullName, "roundtrip.db"));
             Console.WriteLine("PASS task edits, status moves, ordering, archive and restore across reopen");
+            CheckArchivedDeletion(Path.Combine(temporary.FullName, "archive-delete.db"));
+            Console.WriteLine("PASS archived-only deletion, reopen persistence and rollback on failed delete");
             CheckCaptureNotes(Path.Combine(temporary.FullName, "capture-notes.db"));
             Console.WriteLine("PASS capture adds a normalized optional note atomically and respects edit limits");
             PreserveUnsupportedFiles(temporary.FullName);
@@ -257,6 +259,61 @@ internal static class Program
         reopened.SetArchived(totals, archived: true);
         reopened.Move(notes, TaskStatus.Done);
         Require(reopened.ReturnTask() is null, "Done and archived cards leave a timer-only break.");
+    }
+
+    private static void CheckArchivedDeletion(string path)
+    {
+        var store = new TaskStore(path);
+        store.Add("Active first", "Keep its note");
+        store.Add("Active second");
+        store.Add("Archived first");
+        store.Add("Delete this archived task", "Remove its note");
+        store.Add("Archived last", "Keep this note");
+        store.Add("Restored task");
+        var tasks = store.List(archived: false);
+        var target = tasks[3];
+        var restored = tasks[5];
+        foreach (var task in tasks.Skip(2))
+        {
+            store.SetArchived(task.Id, archived: true);
+        }
+        store.SetArchived(restored.Id, archived: false);
+        store.MoveWithin(tasks[1].Id, -1);
+        var active = store.List(archived: false);
+        var archived = store.List(archived: true);
+        var appearance = new AppearancePreferences(AppearanceTheme.Dark, BreakScene.Daylight, SceneMotion.Off, true);
+        store.SaveAppearance(appearance);
+        store.DismissCaptureGuide();
+        var capture = store.LoadCapturePreferences();
+        var preservedPosition = Scalar(path, $"SELECT position FROM tasks WHERE id = {tasks[4].Id}");
+
+        var before = TaskFingerprint(path);
+        ExpectStorageError(() => store.DeleteArchived(active[0].Id));
+        ExpectStorageError(() => store.DeleteArchived(long.MaxValue));
+        ExpectStorageError(() => store.DeleteArchived(restored.Id));
+        Require(TaskFingerprint(path) == before, "Rejections preserve the active, archived and restored rows exactly.");
+
+        // FAIL leaves changes preceding the error in the transaction, including the triggering deletion.
+        ExecuteSql(path, """
+            CREATE TRIGGER fail_delete AFTER DELETE ON tasks BEGIN
+                UPDATE appearance_preferences SET theme = 'Light';
+                SELECT RAISE(FAIL, 'delete failure');
+            END;
+            """);
+        ExpectStorageError(() => store.DeleteArchived(target.Id));
+        Require(TaskFingerprint(path) == before && new TaskStore(path).LoadAppearance() == appearance,
+            "A failed delete rolls back the deleted row, its note and any trigger side effects.");
+        ExecuteSql(path, "DROP TRIGGER fail_delete;");
+
+        store.DeleteArchived(target.Id);
+        var reopened = new TaskStore(path);
+        Require(reopened.List(archived: true).SequenceEqual(archived.Where(task => task.Id != target.Id)) &&
+            reopened.List(archived: false).SequenceEqual(active), "Reopen shows only the selected archived row removed.");
+        Require(Equals(Scalar(path, $"SELECT position FROM tasks WHERE id = {tasks[4].Id}"), preservedPosition),
+            "Deleting from the middle of the archive keeps the remaining row positions.");
+        Require(reopened.LoadAppearance() == appearance && reopened.LoadCapturePreferences() == capture &&
+            Scalar(path, "PRAGMA user_version") is 11L, "Deletion preserves existing settings and the schema version.");
+        ExpectStorageError(() => reopened.DeleteArchived(target.Id));
     }
 
     private static void CheckCaptureNotes(string path)

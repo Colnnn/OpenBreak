@@ -138,6 +138,15 @@ internal sealed partial class TaskStore(string path)
         transaction.Commit();
     }
 
+    internal void DeleteArchived(long id)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var delete = Command(connection, transaction, "DELETE FROM tasks WHERE id = $id AND archived = 1", ("$id", id));
+        EnsureTaskChanged(delete);
+        transaction.Commit();
+    }
+
     private SqliteConnection Open()
     {
         if (!File.Exists(path))

@@ -44,6 +44,8 @@ internal sealed class MainWindow : Window
 
         navigation.Resources["NavigationViewContentBackground"] = SurfaceStyle.Brush(0, 0);
         navigation.Resources["NavigationViewContentGridBorderBrush"] = SurfaceStyle.Brush(0, 0);
+        // In minimal mode the native pane toggle sits above the selected page.
+        navigation.Resources["NavigationViewMinimalContentMargin"] = new Thickness(0, 40, 0, 0);
         var body = new Grid();
         AddPage(ManagementPage.Focus, "Focus", Symbol.Play, focus);
         AddPage(ManagementPage.Tasks, "Tasks", Symbol.List, tasks);

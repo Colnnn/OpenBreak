@@ -26,6 +26,7 @@ internal sealed class MainWindow : Window
         OpenPaneLength = 176,
     };
     private readonly Dictionary<ManagementPage, (NavigationViewItem Item, UserControl Content)> pages = [];
+    private readonly Border pageCanvas;
     private bool placed;
     private bool quitting;
     private bool tasksNeedRefresh = true;
@@ -53,7 +54,14 @@ internal sealed class MainWindow : Window
         AddPage(ManagementPage.Breaks, "Breaks", Symbol.Clock, breaks);
         AddPage(ManagementPage.Capture, "Capture", Symbol.Edit, capture);
         AddPage(ManagementPage.Appearance, "Appearance", Symbol.Setting, appearance);
-        navigation.Content = body;
+        // The window backdrop is visible in the shell. The page canvas stays opaque over it.
+        pageCanvas = new Border
+        {
+            Name = "ManagementContentCanvas",
+            Style = SurfaceStyle.GetStyle("OpenBreakManagementBackdropStyle"),
+            Child = body,
+        };
+        navigation.Content = pageCanvas;
         var quickCapture = ManagementStyle.Button("Quick capture", "QuickCapture", () =>
         {
             if (CurrentPage != ManagementPage.Tasks || !Tasks.HasModalEditor)
@@ -189,6 +197,14 @@ internal sealed class MainWindow : Window
 
     internal void ApplyAppearance(AppearanceState state, ElementTheme theme)
     {
+        if (state.HighContrast)
+        {
+            pageCanvas.Background = SurfaceStyle.Brush(state.WindowColor);
+        }
+        else
+        {
+            pageCanvas.ClearValue(Border.BackgroundProperty);
+        }
         FocusHome.ApplyAppearance(state);
         Tasks.ApplyAppearance(state, theme);
         Breaks.ApplyAppearance(state);

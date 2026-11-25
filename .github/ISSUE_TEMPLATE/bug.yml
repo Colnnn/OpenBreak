@@ -1,0 +1,33 @@
+name: Bug report
+description: Report an unexpected result in OpenBreak
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use [the security policy](https://github.com/Colnnn/OpenBreak/blob/main/SECURITY.md) for possible vulnerabilities. Use sample tasks and remove personal details from screenshots or logs.
+  - type: input
+    id: version
+    attributes:
+      label: OpenBreak version or source commit
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+      description: Run winver to find the version and OS build.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include any settings that affect the result.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true

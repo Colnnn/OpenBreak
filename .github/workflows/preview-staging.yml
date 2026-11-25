@@ -1,0 +1,66 @@
+name: Stage Windows preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: Full 40-character commit SHA of the selected ref
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage-preview:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Verify dispatch revision
+        env:
+          EXPECTED_REVISION: ${{ inputs.expected_revision }}
+        run: |
+          if ($env:EXPECTED_REVISION -notmatch '^[0-9a-fA-F]{40}$' -or $env:EXPECTED_REVISION -ne $env:GITHUB_SHA) {
+            throw 'Enter the full commit SHA of the selected ref.'
+          }
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the pinned .NET SDK
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}\openbreak-dotnet
+        with:
+          global-json-file: global.json
+          architecture: x64
+          skip-lts-prepass: true
+          cache: false
+
+      - name: Build and stage preview files
+        id: preview
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "openbreak-preview-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sdk = Join-Path $env:DOTNET_ROOT 'dotnet.exe'
+          .\.github\scripts\Build-Windows.ps1 -OutputDirectory $output -ExpectedRevision $env:GITHUB_SHA -DotNetPath $sdk -DownloadCompiler
+          .\.github\scripts\Stage-Preview.ps1 -BuildDirectory $output -ExpectedRevision $env:GITHUB_SHA
+
+      - name: Upload files for review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenBreak-preview-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.preview.outputs.installer }}
+            ${{ steps.preview.outputs.zip }}
+            ${{ steps.preview.outputs.checksums }}
+          if-no-files-found: error
+          compression-level: 0

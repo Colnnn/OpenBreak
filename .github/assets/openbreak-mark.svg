@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-labelledby="title desc">
+  <title id="title">OpenBreak</title>
+  <desc id="desc">An open circle surrounding a pause symbol.</desc>
+  <rect x="0.35" y="0.6" width="15.3" height="14.8" rx="3.5" fill="#116b55"/>
+  <g fill="none" stroke="#ffffff" stroke-width="1.72" stroke-linecap="round">
+    <path d="M13.02 6.65 A5.2 5.2 0 1 1 10.20 3.29"/>
+    <path d="M6.35 5.7v4.6M9.65 5.7v4.6"/>
+  </g>
+</svg>

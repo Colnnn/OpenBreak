@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an improvement to OpenBreak
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Describe where you get stuck in your current workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: What change would help?
+      description: Describe how the change would fit into the way you use OpenBreak.
+    validations:
+      required: true
